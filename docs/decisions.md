@@ -516,12 +516,11 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
 
 ## 17. 2026-10-16 (night): T1 preparation results and two recorded changes
 
-- **Stop-per-increment restored.** The operator restored `guide-product-work`'s stop-per-increment
-  rule after the v1 preparation. This run ends with T1 handed to the operator (`docs/progress.md`:
-  T1 `prepared`, T2 `pending`); everything beyond T1 that was built is the safe preparation
-  `county-readiness-preflight` allows while the validator is BLOCKED (adapter scaffold, transform,
-  fixtures, permit-profile fixtures, seed script not run) and is labelled "preparation, not T2".
-  No seed, smoke, pilot or `ingest --live-fetch` has run.
+- **Hand-off at T1** (the restoration of stop-per-increment is recorded in section 15). This run
+  ends with T1 handed to the operator (`docs/progress.md`: T1 `prepared`, T2 `pending`); everything
+  beyond T1 that was built is the safe preparation `county-readiness-preflight` allows while the
+  validator is BLOCKED and is labelled "preparation, not T2". No seed, smoke, pilot or
+  `ingest --live-fetch` has run.
 - **Section 5, non-lexicon permit fields: option (ii) is dead at `validate`.** Every live class
   schema is `additionalProperties: false` without `source_payload`, and `elephant-cli validate`
   1.58.1 (commit `44bb182`) rejects `source_payload` on a `property` entity (kit evidence
