@@ -215,7 +215,7 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
     reconcile.
   - Per-field evidence-state counts for `completed_date`, `status_current` and `tcad_id` are written to the
     run record and exposed by `/v1/meta`, so the basis of every `stalled` or unlinked row is countable.
-  - **Open decision for the `mew` review (blocks the hosted-layer design).** The product fields the README
+  - **Decision on non-lexicon permit fields (decided by the operator on 2026-10-16; `mew` verifies the premise).** The product fields the README
     needs on a permit (`description`, the printed `status_current`, `expires_date`, the printed contractor
     fields, and therefore text search) have no `property_improvement` property: the class carries the permit
     dates, `fee`, `contractor_type`, the owner-builder and disaster flags and the enums `improvement_type`,
@@ -227,8 +227,10 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
     build also read the published archive blocks, if `mew` confirms that `source_payload` survives
     validate → hash into the CAR; (iii) have the deploy-time build re-read the public Socrata export for the
     non-lexicon columns, keyed by `permit_number` and joined to the published `record_cid`, with its own
-    `source_http_request` and shown as source-backed but unpublished fields. Recommendation: (ii) if it holds,
-    else (iii); never the Query DB.
+    `source_http_request` and shown as source-backed but unpublished fields. Decided: (ii) if it holds, else
+    (iii); never the Query DB. The `mew` review answers the factual question first, whether `source_payload`
+    survives `validate` → `hash` into the archive blocks; T7's deploy-time build then reads the published
+    archive (ii) or the public export (iii), and T4's profile fixtures cover both paths.
 - A small deploy-time **search-center** table holds, for every distinct situs city and situs ZIP in the roll,
   the centroid of its parcels with coordinates and the parcel count. It is the only way a place name becomes a
   search center; no external geocoder is called. It is not published, and it is not the kit's `places`
@@ -412,5 +414,6 @@ Applied in place before implementation; the review and every citation are in
   gap and the `property_improvement` provenance; §3, §5, contract: the API serves only the published permit
   scope, unlinked and excluded permits are counts; §4 privacy classification and registry candidates
   conditional on a published group; §5 owners as `company`/`person`, `unlinked_reason`, lifecycle mapping,
-  estimator run twice, evidence-state counts, `status_source`, and the **open decision** on non-lexicon
-  permit fields for `mew`; §7 `cars[].kind` and the manifest as a packet descriptor.
+  estimator run twice, evidence-state counts, `status_source`, and the decision on non-lexicon permit
+  fields (option ii, else iii, decided by the operator the same day; `mew` verifies whether `source_payload`
+  survives hashing); §7 `cars[].kind` and the manifest as a packet descriptor.
