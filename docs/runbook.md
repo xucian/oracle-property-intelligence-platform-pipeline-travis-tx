@@ -91,32 +91,48 @@ cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
 node bin/elephant-county.mjs replay --county travis --fixture fixtures/travis-replay --output "$(mktemp -d)"
 ```
 
-## 3. T2 (only after T1 PASS and the operator's go-ahead)
+## 3. T2 — appraisal transform and appraisal-only pilot (offline)
 
-Blocker before any `elephant-cli validate` can pass: the lexicon county enum lacks `Travis`
-(`kit docs/travis-lexicon-county-enum-request.md`). Open that pull request on `elephant-xyz/lexicon`
-and wait for the manifest to carry the new schema CIDs; until then every Travis property fails on
-exactly that error (proved on the fixture, kit `docs/evidence/travis-fixture-validate-2026-10-16.txt`).
+Runs offline: no `--live-fetch`, so no request to traviscad.org, gis.traviscountytx.gov or data.texas.gov
+(each seed row already carries its TNR geometry and the page query that returned it), and no egress check is
+needed. The only network request is the public lexicon manifest, which the adapter reads from
+`<run>/lexicon-manifest.json`. Blocker for `validate` to pass: the county enum lacks `Travis`
+(elephant-xyz/lexicon#194, open); until it merges every property fails on exactly that error.
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-curl -s ipinfo.io/country   # US required: --live-fetch queries the TNR MapServer layer per parcel
-head -2 data/seeds/travis-pilot.csv > data/seeds/travis-smoke.csv
-
-# one-parcel smoke, then the 25-parcel appraisal-only pilot (no permit harvest; eligibility __NONE__)
-run=data/travis/runs/smoke-1 && node bin/elephant-county.mjs ingest --county travis --seed data/seeds/travis-smoke.csv --html-dir "$run/html" --live-fetch --output "$run"
-run=data/travis/runs/pilot-1 && node bin/elephant-county.mjs ingest --county travis --seed data/seeds/travis-pilot.csv --html-dir "$run/html" --live-fetch --output "$run"
-node bin/elephant-county.mjs reconcile-export --county travis --seed data/seeds/travis-pilot.csv --run data/travis/runs/pilot-1 --output data/travis/runs/pilot-1/reconciliation
-
-# publication steps on the pilot county group (CLI from this repository), no Atlas PR in v1
 cli=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli
-mkdir -p data/travis/publish/pilot-1/county && for d in data/travis/runs/pilot-1/*/; do id=$(basename "$d"); [ -d "$d/data" ] && mkdir -p "data/travis/publish/pilot-1/county/$id" && cp -R "$d/data" "data/travis/publish/pilot-1/county/$id/"; done
-cd data/travis/publish/pilot-1
-$cli validate ./county --output-csv travis-county-errors.csv
+{ head -1 data/seeds/travis-pilot.csv; grep '^830704,' data/seeds/travis-pilot.csv; } > data/seeds/travis-smoke.csv
+
+# $1 = seed, $2 = smoke|pilot; prints the run directory
+t2run() {
+  run=data/travis/runs/$(date -u +%Y%m%dT%H%M%SZ)-$2; mkdir -p "$run/html"
+  curl -sf https://lexicon.elephant.xyz/api/manifest -o "$run/lexicon-manifest.json"
+  node bin/elephant-county.mjs ingest --county travis --seed "$1" --html-dir "$run/html" --output "$run" > "$run/ingest-stdout.json"
+  node bin/elephant-county.mjs reconcile-export --county travis --seed "$1" --run "$run" --output "$run/reconciliation"
+  for z in "$run"/*/transformed.zip; do id=$(basename "$(dirname "$z")"); mkdir -p "$run/validate/county/$id"; unzip -q -o "$z" -d "$run/validate/county/$id"; done
+  (cd "$run/validate" && $cli validate ./county --output-csv ./travis-county-errors.csv > validate.log 2>&1; tail -2 validate.log)
+  echo "$run"
+}
+t2run data/seeds/travis-smoke.csv smoke
+t2run data/seeds/travis-pilot.csv pilot
+```
+
+Expect: smoke 1 = 1 + 0 + 0; pilot `reconciled` 25 = 25 success + 0 permanent + 0 retryable, `geometryCount` 13,
+reconcile-export `rowCount` 25 = `expectedCount` 25; validate prints `Properties processed: 25, succeeded: 0,
+failed: 25`, and `travis-county-errors.csv` has 25 rows, all `/relationships/property_seed/to/county_jurisdiction`
+with value `Travis`. Inspect: `<run>/manifest.json` (`reconciled`, `timings`), one parcel's `data/` and its
+`source-payload.json` (the lexicon-gap sidecar, never in the archive), and the error CSV. The agent's run is kit
+`docs/evidence/travis-t2-run-20261016T215528Z.json`.
+
+After lexicon#194 merges and the live manifest carries the new schema CIDs, re-run the pilot; `validate` must exit 0.
+Then, in the pilot's `validate` directory (no Atlas clone, no PR in v1):
+
+```bash
 $cli hash ./county --output-zip ./travis-county-hashed --output-csv travis-county-hash.csv --output-car travis-county.car
 $cli validate travis-county.car --output-csv travis-county-car-errors.csv
 $cli export-tables travis-county.car --output ./travis-county-tables --part-size 128m --output-json travis-county-tables-export.json \
-  --atlas-page ./atlas-page/counties/TX/travis.json --county travis --state TX --fips 48453     # local page file only; no Atlas clone, no PR
+  --atlas-page ./atlas-page/counties/TX/travis.json --county travis --state TX --fips 48453     # local page file only
 ```
 
 ### Upload with readback (needs the credential mapping; no Atlas PR)
