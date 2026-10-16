@@ -540,3 +540,22 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
   `statusdate`/`applieddate` windows, not on `:updated_at` (section 6 reads that way).
 - **Elephant CLI** is installed project-locally in this repository (`package.json` devDependency,
   `github:elephant-xyz/elephant-cli#main` resolved to 1.58.1 / `44bb182b9f7f904662e9b33e1fde70bdeab62322`).
+
+## 18. 2026-10-16 (night): the lexicon merge is a hard dependency
+
+- Unlike the Atlas merge (section 7) and the transform-scripts merge (section 11), the Travis county-enum change
+  in `elephant-xyz/lexicon` gates the first step, `elephant-cli validate`, because `unnormalized_address`
+  is required in the Seed group of every archive. Without it no Travis record validates, so nothing is hashed,
+  published, hosted or demonstrated; section 11's "waiting for a merge is out of scope" does not cover it.
+- The kit has no lexicon step in county onboarding, so its readiness validator can PASS for a county the enum
+  lacks; that is a kit gap worth reporting. Upstream, adding a county is a routine small pull request (Ellis
+  #171, Hunt #115, Dallas #148), merged the same day by the maintainers.
+- Since `elephant-xyz/lexicon` #189 (merged 2026-10-16) the repository pins the SHA-256 and source revision of
+  `src/data/lexicon.json` in `scripts/build-model-composition.mjs`, so any lexicon edit also needs the Model
+  composition rebuilt, and the revision must name the merge commit. Whether county additions now go through a
+  governed Model release instead of a direct edit is a question for the maintainers.
+- Route: a pull request from the operator's fork, carrying the change exactly as Ellis did and asking the
+  maintainers which composition route they want. It is the operator's decision; T1 to T2 preparation and every
+  increment's code and fixtures continue meanwhile, and validation is re-run when the published manifest
+  includes Travis.
+
