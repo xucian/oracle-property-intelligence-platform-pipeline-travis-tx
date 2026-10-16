@@ -12,37 +12,52 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 
 ## Transport
 
-- HTTPS, JSON, UTF-8. No authentication. CORS `*`.
+- HTTPS, JSON, UTF-8. No authentication. CORS: any origin; allowed request headers `content-type` and
+  `mcp-protocol-version`; exposed response headers `x-request-id` and `apigw-requestid`; methods `GET`, `POST`,
+  `OPTIONS`; no credentials. API Gateway sets these headers, never the handler.
 - Base URL: recorded in `docs/runbook.md` and the PR body after deploy as `API_BASE` (README.md is the
-  assignment text and is never edited). OpenAPI 3.1 served at `GET /v1/openapi.json` and kept identical to this file.
+  assignment text and is never edited). The normative machine-readable form of v1 is the committed `openapi.json`
+  (OpenAPI 3.1, `servers: [{"url": "/"}]`), generated from the Zod contract package as T7's first commit and served
+  byte-identical at `GET /v1/openapi.json`; this Markdown is its prose companion, and CI fails if the two disagree.
 - MCP (Streamable HTTP, stateless JSON responses, no SSE) at `POST /v1/mcp`, exposing the same operations as
-  tools (see "MCP tools"). The server supports exactly one MCP protocol revision, negotiated at `initialize`
-  and recorded in `/v1/meta.mcp.protocol_version`; changing it is a v2 change. Every tool result carries
+  tools (see "MCP tools"). The server supports exactly one MCP protocol revision, `2025-06-18`, the first with
+  `structuredContent` and `outputSchema`; it is also reported in `/v1/meta.mcp.protocol_version`, and changing it
+  is a v2 change. Requests are `POST` with `Content-Type: application/json` and
+  `Accept: application/json, text/event-stream`, and carry `MCP-Protocol-Version: 2025-06-18` after `initialize`; a
+  request without that header is served as `2025-06-18`, and any other value gets `400`. Each `POST` is served on
+  its own: no `Mcp-Session-Id` is issued, and `GET` and `DELETE /v1/mcp` return `405`. Every tool result carries
   `structuredContent` (valid against the tool's `outputSchema`) plus one text block holding the same JSON.
-- Throttling is per API stage, shared by all clients: 20 requests/s steady, burst 40. Route throttles:
-  `/v1/agent/chat` 1 request/s, burst 3; `/v1/permits/text-search` 5 requests/s, burst 10. Chat output is
-  capped per request (1,500 output tokens) and a CloudWatch alarm watches daily chat invocations and token
-  usage. Over limit → `429`; the body is API Gateway's own throttling message and a `Retry-After` header may be
-  absent, so clients back off on the status code alone (1 s, then 2 s, then 4 s). Tool calls the pipeline's own
-  agent makes inside its Lambda do not pass through the HTTP API; the CRM's agent calls over HTTP and must
-  back off on `429` like any client.
+- Throttling is enforced by API Gateway per stage and per route and is shared by all clients. The current numbers,
+  including the chat output cap, are published in `/v1/meta.limits` and may change without a version change; the
+  rule does not. Over limit → `429`; the body is API Gateway's own throttling message and a `Retry-After` header may
+  be absent, so clients back off on the status code alone (1 s, then 2 s, then 4 s). Tool calls the pipeline's own
+  agent makes inside its function do not pass through the HTTP API; the CRM's agent calls over HTTP and must back
+  off on `429` like any client.
 - The MCP endpoint is a single route, so the server enforces the same per-operation limits inside the MCP
-  handler: `search_permit_text` 5 requests/s, burst 10; the other tools at the stage rate. These limits are
+  handler, with the per-tool numbers in `/v1/meta.limits.mcp`. These limits are
   enforced per server instance, so the effective global rate is the per-instance rate times the instances
   running. Tool failures, over-limit and invalid input included, are returned as tool results with
-  `isError: true` and `structuredContent` `{error, detail?, retry_after_seconds?}`, never as JSON-RPC errors, so
+  `isError: true` and `structuredContent` `{error, detail?, retry_after_seconds?, request_id}`, never as JSON-RPC
+  errors, so
   the calling model sees them; on `rate_limited` the client backs off as for `429`.
-- Errors: `400 {error, detail}` for invalid params, `404 {error}` for unknown ids, `413 {error, detail}` for an
-  oversized chat request, `429`, `5xx {error, request_id}`. Chat adds
+- Errors: `400 {error, detail, request_id}` for invalid params and stale cursors, `404 {error, request_id}` for
+  unknown ids, `413 {error, detail, request_id}` for an oversized chat request, `429`, `5xx {error, request_id}`.
+  Chat adds
   `503 {error: "agent_unavailable", reason: "budget_exhausted"|"model_unavailable"|"circuit_open", request_id}`.
-  API Gateway cuts any request off at 30 s and may then return its own `503`/`504` body. Clients never retry
-  chat automatically on a `5xx` or `504`.
-- Every REST and MCP response carries an `x-request-id` header; the same value appears as `request_id` in error
-  bodies and chat responses, so a client's traces can be joined to the server's logs.
+  Responses API Gateway generates itself carry only its own `{message}` body and the `apigw-requestid` header: the
+  `429` throttle, a `413` above the platform's payload limit, a `5xx` on a function error or throttle, and
+  `503`/`504` when a request passes 30 s. Clients never retry chat automatically on a `5xx` or `504`.
+- Every response the server writes carries an `x-request-id` header equal to API Gateway's request id
+  (`apigw-requestid`); the same value appears as `request_id` in error bodies, MCP `isError` results and chat
+  responses, so a client's traces can be joined to the server's logs. Gateway-generated responses carry
+  `apigw-requestid` only.
 - Untrusted text: `description`, `permit_class`, `work_class`, `applicant`, the printed contractor fields,
   `owner_name` and `match_snippet.text` are third-party text from public records. A client that passes them to
   a model must treat them as data, never as instructions.
 - Path ids are URL-encoded; `permit_id` contains a space (`2026-102216%20EP`).
+- Paging: `next_cursor` is opaque and tied to `/v1/meta.deploy.deploy_id` and the query's `open_duration_as_of`. A
+  cursor from another snapshot or another day returns `400 {error: "stale_cursor", request_id}`, and the client
+  restarts from the first page.
 
 ## Shared definitions
 
@@ -51,7 +66,7 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 | `property_id` | TCAD **Property ID** (`PROP_ID`) exactly as the roll prints it: a string, never normalized, leading zeros preserved (the roll and the GIS layer print an integer, so none are expected). It is the lexicon `parcel_identifier` and the kit's `request_identifier` for the parcel. |
 | `geo_id` | TCAD **Geographic ID** (`geo_id`, string, e.g. `0222210299`), kept exactly as printed. Austin permits carry it as `tcad_id`; **permits link to properties on `geo_id`**, never on `property_id`. The link compares the printed values exactly first. Comparing with every non-digit character removed is a fallback that is enabled only after the Travis permit profile has proven that normalization one-to-one over the roll (no two `geo_id` values collapse) and recorded its version. Every served permit states how its link was made (`property_link`). A permit with zero or several candidate parcels stays valid-unlinked in the Query DB, is never published or served, and is counted under `/v1/meta.unlinked_reasons`. |
 | `permit_id` | Austin permit number as printed (the lexicon `permit_number`), e.g. `2026-102216 EP`. |
-| `contractor_attribution_key` | Pipeline-assigned grouping key: hash of the printed company name and phone. It groups permits that print the same values; it is **not** an identity, and phone never feeds identity. Every contractor object carries `identity_status: "source_name_attribution"`; `official_identity` is null until an official registry or licensing record matches, which v1 does not attempt. |
+| `contractor_attribution_key` | Pipeline-assigned grouping key: hash of the printed company name and phone. It groups permits that print the same values; it is **not** an identity, and phone never feeds identity. Every contractor object carries `identity_status: "source_name_attribution"`; `official_identity` is null until an official registry or licensing record matches, which v1 does not attempt. The key is stable across deploys for identical printed values; its recipe is versioned as `/v1/meta.attribution_key_version`, and changing the recipe is a v2 change. |
 | `run_id` | Pipeline run id, `YYYYMMDDTHHMMSSZ`. |
 | Distances | Miles, great-circle. Coordinates WGS84 `lat`, `lon`. |
 | Dates | ISO-8601. Date-only where the source is date-only. |
@@ -108,11 +123,16 @@ server derives the exact box from the loaded parcels) is valid and returns `200`
   "limitations": [{"source": "bbb.org", "availability": "unsupported", "source_access_status": "blocked", "incomplete_reason": "http_403_source_block",
                    "detail": "…", "evidence": "runs/…", "records_request": null}],
   "cli_commit": "…", "lexicon_manifest_url": "…", "kit_commit": "99c7bff",
-  "deploy": {"deployed_at": "…", "duckdb_sha256": "…",
+  "deploy": {"deploy_id": "…", "inputs_sha256": "…", "deployed_at": "…", "server_commit": "…", "duckdb_version": "1.5.6", "duckdb_sha256": "…",
              "text_index": {"rows": 0, "config": {"stemmer": "porter", "stopwords": "english", "ignore": "…", "lower": true, "strip_accents": true}, "alias_version": "…"},
              "reads": [{"dataset": "austin-issued-construction-permits/3syk-w9eu", "url": "…", "fetched_at": "…", "sha256": "…",
                         "rows": 0, "matched": 0, "unavailable": 0, "conflicting": 0}]},
-  "mcp": {"protocol_version": "…"}
+  "mcp": {"protocol_version": "2025-06-18"},
+  "attribution_key_version": "…",
+  "limits": {"stage": {"rate": 20, "burst": 40},
+             "routes": {"/v1/agent/chat": {"rate": 1, "burst": 3}, "/v1/permits/text-search": {"rate": 5, "burst": 10}},
+             "mcp": {"search_permit_text": {"rate": 5, "burst": 10}},
+             "chat": {"max_output_tokens": 1500, "turn_deadline_seconds": 25}}
 }
 ```
 
@@ -130,6 +150,10 @@ manual-only jurisdictions. `evidence_states` gives the per-field evidence-state 
 `status_current` and `tcad_id`; `unlinked_reasons` counts the permits that could not be linked, by reason.
 `deploy` pins the snapshot every text-search hit and every unpublished field refers to: the DuckDB file's hash,
 the full-text index configuration and alias-list version, and each export read with its hash and match counts.
+`deploy_id` derives from `inputs_sha256` and changes exactly when the served snapshot changes; `duckdb_sha256` is
+informational, since identical rebuilds can produce different file bytes. `limits` publishes the current throttle
+numbers and the chat output cap; the values shown are the defaults, and T7 derives the chat route's numbers from the
+chat function's reserved concurrency and the Bedrock quota.
 
 ### `GET /v1/search-centers`
 
@@ -153,7 +177,7 @@ Match rule: within radius (when a center is given) **and** (`roof_age_years > ro
 satisfy `open_permits`. `owner_tenure_min`, `absentee_owner` and `out_of_area_owner` narrow further.
 
 Sort: properties with an `open` roofing permit first, then `stalled`, each by `open_duration_days` desc; then
-the rest by `roof_age_years` desc; ties by `distance_miles` asc.
+the rest by `roof_age_years` desc; then `distance_miles` asc (nulls last); then `property_id` asc.
 
 Response: `{items: PropertySummary[], total: number, next_cursor: string|null, area_note: string|null}`. `total` is the exact count of
 matches in the radius, so a client can say "12,431 matches, showing 500". Each item carries `distance_miles`
@@ -169,8 +193,10 @@ Also `GET /v1/properties/by-geo-id/{geo_id}` → the same object.
 Params: `lat`, `lon` (optional, given together; county-wide without them, as for properties), `radius_miles`,
 `status_group` (comma list of `open`, `stalled`, `closed`, `needs_review`; default `open,stalled`),
 `roofing_only` (default `true`), `roof_work_class` (comma list, optional), `min_open_years`,
-`contractor_attribution_key`, `limit`, `cursor`.
-Sort: `open` before `stalled` before `closed` before `needs_review`, then `open_duration_days` desc.
+`contractor_attribution_key`, `property_id` (all permits of one property, to page beyond those embedded in
+`PropertyDetail`), `limit`, `cursor`.
+Sort: `open` before `stalled` before `closed` before `needs_review`, then `open_duration_days` desc (nulls last),
+then `permit_id` asc.
 Response: `{items: PermitSummary[], total, next_cursor, area_note}`; with a center, each item carries
 `distance_miles` (see "Radius basis").
 
@@ -202,7 +228,8 @@ questions ("hail damage re-roofs near Pflugerville"); it does not classify: a hi
 
 ### `GET /v1/runs/{run_id}/manifest`
 
-The run's artifact manifest JSON, byte-identical to the object pinned as `manifest_cid`.
+The run's artifact manifest JSON, served as the pinned bytes unchanged. The manifest does not list itself: its CID
+lives in the Run record and `/v1/meta`. A directory entry's digest is the digest of its root block.
 
 ### `POST /v1/agent/chat`
 
@@ -255,8 +282,8 @@ are read-only and stay read-only: no tool writes, fetches a URL or calls another
 | --- | --- | --- |
 | `resolve_search_center` | `GET /v1/search-centers` | Resolve a Travis County city, alias or ZIP to a centroid. Call it first when a question names a place; never pass coordinates it did not return or the user did not type. |
 | `search_properties` | `GET /v1/properties/search` | Properties within a radius by roof age, open roofing permits and owner signals. `open_permits` is required: a property matches when its roof is older than `roof_age_min` **or**, if `open_permits` is true, it has an open or stalled roofing permit. |
-| `get_property` | `GET /v1/properties/{id}` | One property with its permits. Takes exactly one of `property_id` or `geo_id`. |
-| `search_permits` | `GET /v1/permits/search` | Permits within a radius by status group, roofing class and years open, longest-open first. |
+| `get_property` | `GET /v1/properties/{id}` | One property with its permits. Takes exactly one of `property_id` or `geo_id`. Embeds at most 20 permits, roofing first, with `permits_total` and `permits_truncated`; page the rest with `search_permits` and `property_id`. |
+| `search_permits` | `GET /v1/permits/search` | Permits within a radius, or of one `property_id`, by status group, roofing class and years open, longest-open first. |
 | `search_permit_text` | `GET /v1/permits/text-search` | Free-text search over building-permit descriptions. A hit is roofing only if its `roof_work_class` is in the roofing set. |
 | `get_permit` | `GET /v1/permits/{id}` | One permit with its property, contractor attribution and BBB status. |
 | `get_contractor` | `GET /v1/contractors/{key}` | Permits grouped under one printed contractor name and phone; an attribution, not a verified identity. |
@@ -289,7 +316,9 @@ identity; BBB access is blocked; search centers are parcel centroids; durations 
 | `unpublished_source` | see definitions | backs `geo_id` |
 | `distance_miles`, `match_reasons` | | only in search results; `distance_miles` null for county-wide searches |
 
-**PropertyDetail** = PropertySummary + `owner` + `permits: PermitSummary[]` + `improvements[]` (optional).
+**PropertyDetail** = PropertySummary + `owner` + `permits: PermitSummary[]` (at most 50 on REST and 20 on MCP,
+roofing permits first, then newest) + `permits_total` + `permits_truncated` + `improvements[]` (optional). The rest of a
+property's permits are paged through `GET /v1/permits/search?property_id=`.
 
 **Owner** (public appraisal-roll fields only; the roll carries no phones or emails)
 
@@ -367,11 +396,11 @@ identity; BBB access is blocked; search centers are parcel centroids; durations 
 
 ## Change control
 
-- v1 freezes at the field level once the pre-implementation reviews are complete: `oracle` (done 2026-10-16;
-  the corrections it required are applied in this version), then `mew` (done), `alakazam` (done 2026-10-16,
-  applied below), `metagross`. Until then
-  this file changes in place and each change is dated here; after the freeze, new params and fields must be
-  optional and nullable.
+- **v1 is frozen at the field level as of 2026-10-16**, after the four pre-implementation reviews: `oracle` (two
+  passes), `mew`, `alakazam` and `metagross`, whose corrections are applied in this version. From here on, changes are
+  additive only (new optional params, new nullable fields); anything else is v2. The committed `openapi.json`,
+  generated from the Zod contract package as T7's first commit, becomes the normative machine-readable form; if it
+  disagrees with this file, the generator or this file is fixed before anything ships.
 - 2026-10-16, after the oracle conventions review (`docs/reviews/2026-10-16-oracle-conventions-review.md`):
   `contractor_id` → `contractor_attribution_key` with `identity_status`; `business_match` →
   `registry_candidates[]` plus `official_identity`; `dataset_cid` and `ipns` → `groups` and `atlas`; `cid` →
@@ -406,5 +435,13 @@ identity; BBB access is blocked; search centers are parcel centroids; durations 
   `open_duration_as_of`; durations computed at query time; search-center normalization and `match_type`; a radius
   basis for permit searches; `unpublished_source` on fields the lexicon cannot hold; the dead option (ii) removed;
   `/v1/meta.deploy` and `.mcp`; Run `sources[].sha256`; `x-request-id`; an untrusted-text rule.
+- 2026-10-16, after the metagross review (`docs/reviews/2026-10-16-metagross-hosted-layer-review.md`): `x-request-id`
+  equals API Gateway's request id and gateway-generated responses are described; CORS details; throttle numbers move
+  to `/v1/meta.limits`; MCP pinned to revision `2025-06-18` with its headers, `405` for `GET`/`DELETE` and no session;
+  the committed `openapi.json` is normative; `PropertyDetail.permits` capped with `permits_total` and
+  `permits_truncated`, and `property_id` added to permit search; sorts end on `property_id` and `permit_id`; cursors
+  tied to the deploy and the day (`stale_cursor`); `/v1/meta.deploy` gains `deploy_id`, `inputs_sha256`,
+  `server_commit` and `duckdb_version`; `contractor_attribution_key` stable and versioned; `request_id` in every
+  server error body; the manifest does not list itself. Contract frozen.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.

@@ -68,10 +68,12 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
      export-tables → upload with readback; manifest, second pin, gateway checks, Atlas PR. Check: every root
      fetched from two public gateways with matching digests; the Atlas PR URL recorded.
   7. **T7 Hosted query layer** (`metagross`; after T6): the deploy-time DuckDB from the uploaded tables, the
-     Lambda with REST `v1` and MCP. Check: `/v1/openapi.json` equals the contract, one MCP tool call answers,
-     Lambda logs inspected.
+     Lambda with REST `v1` and MCP. Check: `/v1/openapi.json` equals the committed file, one MCP tool call answers,
+     the cold first request of each function lands within its budget, one `429` from the chat route and one alarm
+     transition are seen, all traced in the Lambda and HTTP API access logs by `apigw-requestid` (section 21).
   8. **T8 Explorer** (after T7): the static explorer with its Verify action and query panels. Check: the
-     README demo transcript steps 1–7 on the live URL; CloudFront and S3 inspected.
+     README demo transcript steps 1–7 on the live URL, a live two-gateway Verify and a DuckDB-WASM range read;
+     CloudFront and S3 inspected (section 21).
   9. **T9 Agent** (after T7): the Bedrock agent behind `/v1/agent/chat` with the `v1` tools. Check: the golden set of section 20,
      replayed under SAM local and then on AWS, passes its hard gates; Lambda, Bedrock and LangSmith traces inspected. Kept separate
      from T8 because it is a different concept with a different inspection point.
@@ -280,7 +282,8 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
    the tables directory, each requiring CID-matching readback of its root through a public gateway before
    anything else happens. CAR shards follow the kit's 5,000-property cap.
 2. README packet, every run: `publish/<run_id>/manifest.json` listing every kit-eligible object (per group the
-   archive root `cid`, the tables root, every table part and the schema CID, plus the manifest itself) with
+   archive root `cid`, the tables root, every table part and the schema CID; the manifest does not list itself, since its CID lives in the run record and
+   `/v1/meta`, section 21) with
    `cid` (CIDv1 base32), `name`, `size`, codec (`file`/`directory`), `sha256`, optional `origins`. Coverage is
    expressed as counts inside the manifest (the README's "coverage"); the CountyIndex and CountyTables roots are
    its "indexes"; one property's data-group root CID is its "sample extract". No Query DB export, coverage
@@ -317,7 +320,9 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
 - One Lambda (Node 22, packaged as a container image or with a layer so DuckDB's native binary ships) running
   DuckDB over the deploy-time database file described in section 5, behind an HTTP API: REST `v1`, MCP at `/mcp`
   (stateless JSON, no SSE), `/v1/permits/text-search` and `/v1/agent/chat`. Pay per request, reserved
-  concurrency, stage and route throttling as in the contract, no always-on database.
+  concurrency, stage and route throttling as in the contract, no always-on database. Sections 20 and 21 supersede
+  this bullet: two functions from one container image with the DuckDB file baked in, MCP at `/v1/mcp`, Bedrock
+  granted to the chat function only.
 - Agent: Vercel AI SDK + Zod on Bedrock, `ToolLoopAgent` with the `v1` operations as typed tools, including
   `resolve_search_center` (called first when a question names a city or ZIP) and `search_permit_text`; cites ids
   and sources; per-request output cap and a CloudWatch alarm on daily usage.
@@ -337,7 +342,8 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
   is the guideline's documented-sync case. Critical-failure alerting goes to a PagerDuty free-tier service
   through SNS if it can be wired in the hosting increment; otherwise the alarms notify by email and the PR
   records the substitution. Local Lambda emulation for the agent uses `sam local` against the CDK-synthesized
-  template, as the kit's RAG skill asks; CDK remains the only IaC.
+  template, as the kit's RAG skill asks; CDK remains the only IaC. Section 20 replaces the
+  timeout and retries with a 25 s turn deadline and one retry; section 21 wires PagerDuty at T7.
 - Powertools logger, tracer and metrics on the Lambda; secrets in SSM/Secrets Manager; cost-allocation tags.
 - Not used: Cloudflare, SAM as IaC, Terraform, browser-held keys.
 
@@ -368,8 +374,8 @@ Live explorer URL, `API_BASE` and its `/v1/openapi.json`, MCP URL, demo video re
 at least two runs and two sets of group root CIDs, `docs/reviews/` (one record per pre-implementation review),
 `docs/intent.md`, `docs/runbook.md` (rerun from a clean clone: kit checkout, `.env.example`, the mirror script,
 the ingest and publish commands), `docs/slowking-self-assessment.md`, record counts per table with source,
-limitations, a cost table that separates standing cost (S3, CloudFront, CloudWatch) from per-request cost
-(Lambda, Bedrock) and shows the ingestion runtime at zero when idle, "how to review in two minutes".
+limitations, a cost table itemized as section 21 requires, separating standing from per-request cost with the
+worst-case day, and showing the ingestion runtime at zero when idle, "how to review in two minutes".
 
 ## 13. Contingencies (2026-10-16)
 
@@ -633,7 +639,7 @@ the contract changes are dated in `api-contract.md`'s change control.
   case.
 - **Personal data.** The agent's view of `get_property` and `get_permit` omits `owner_name`, `mailing_address`,
   `applicant` and the contractor's phone unless the question asks about ownership or contact. Logs and traces carry
-  ids, counts and hashes only; LangSmith hides person fields. CloudWatch logs are kept 30 days; LangSmith retention
+  ids, counts and hashes only; LangSmith hides person fields. CloudWatch logs are kept 90 days (section 21); LangSmith retention
   is the plan's and is recorded at T9. The section 13 fallback adds a processor outside AWS and is recorded as such.
 - **Stateless chat.** HTTP ingress with no Chat SDK state: the kit's `ConversationEventStore` interface with its
   `NoopConversationEventStore`, so AgentCore Memory can be added later without a contract change. Tool results do
@@ -680,4 +686,113 @@ the contract changes are dated in `api-contract.md`'s change control.
 - **Effect on the plan.** T7 gains the chat function split, the citation check and MCP schemas generated from the tool
   registry, about 1 to 2 hours; T9 gains the golden set, tracing, caching and the budget controls, about 2 to 3
   hours. The CRM syncs these contract changes with the rest at the freeze.
+
+## 21. 2026-10-16 (night): corrections after the metagross hosted-layer review; contract frozen
+
+Applied before the freeze; the review and its citations are in
+[`reviews/2026-10-16-metagross-hosted-layer-review.md`](./reviews/2026-10-16-metagross-hosted-layer-review.md). With
+it the four pre-implementation reviews are done and `api-contract.md` v1 is frozen at the field level.
+
+- **Layout** (pnpm + Turborepo, the kit's locations): `apps/api/` holds the REST, MCP and chat handlers, one
+  Dockerfile and one image for two functions, with the CDK app in `apps/api/cdk/`; `apps/explorer/` is the React +
+  Vite app; `packages/contract/` holds the Zod params and responses and generates the committed `openapi.json` and
+  the MCP and agent tool schemas; `packages/api-client/` is the explorer's typed client (the CRM generates its own
+  from `openapi.json`); `packages/query/` holds the DuckDB schema and one SQL implementation per operation, called
+  in-process by REST, MCP and the agent's tools; `packages/deploy-build/` verifies inputs and builds the DuckDB file,
+  importing the estimator and the Travis profile from the pinned kit worktree; `packages/tsconfig/`. `oracle/travis/`,
+  `publish/`, `runs/` and `docs/` stay outside the workspace. Deploy order: deploy-build, `cdk deploy TravisApi`, the
+  explorer built with `VITE_API_URL`, `cdk deploy TravisWeb`, then the T7 and T8 checks.
+- **Recorded exceptions.** REST, OpenAPI and MCP replace tRPC: the CRM is a separate repository, so a shared router
+  type cannot reach it; one Zod package keeps the kit's intent. S3 and CloudFront replace Amplify: one distribution
+  serves the explorer and the CID-keyed Parquet mirror, so DuckDB-WASM reads are same-origin. No custom domain: this
+  is not a catalog product with an Environment-owned domain; `API_BASE` is the HTTP API's `$default` execute-api URL
+  and the `HttpApi` construct ID never changes. One deployed environment, one account, `us-east-2`, stacks without
+  stage suffixes; local is SAM local with the fixture DuckDB, and CI is synth plus tests. No kit metric registry or
+  Main Dashboard: an in-repo metric registry and one dashboard defined in the stack.
+- **Stacks.** One CDK app with `TravisApi` (both functions, the HTTP API, alarms, SNS, the private deploy bucket) and
+  `TravisWeb` (CloudFront, the explorer bucket, the mirror bucket), each pinned to `us-east-2`, tagged `project_name`,
+  with fixed construct IDs. One Zod-validated CDK config holds account, region, model id, memory, reservation,
+  throttles, alarm subscribers and the explorer's `VITE_API_URL`.
+- **DuckDB in Lambda.** The checkpointed, read-only DuckDB file is baked into the container image both functions
+  share, in a layer before the code so code-only deploys reuse it; Lambda loads image chunks lazily, so no cold start
+  downloads 2 GB. The S3 download stays only if T7 measures the cold first-request p95 far inside the 25 s and 30 s
+  budgets. One `DockerImageFunction` image, arm64, DuckDB's Node bindings installed for linux-arm64 inside the
+  Lambda base image, DuckDB 1.5.6 as in the build, `fts` bundled with `extension_directory` set and autoinstall off,
+  `memory_limit`, `threads` and `temp_directory=/tmp` set explicitly, memory sized from T7's measurements.
+- **Routes, throttles and CORS.** Four routes: `POST /v1/agent/chat` to the chat function; `GET /v1/permits/text-search`,
+  `POST /v1/mcp` and `$default` to the API function. Limits set on the `$default` stage's route settings and published
+  in `/v1/meta.limits`; HTTP APIs have no usage plans and WAF would add standing cost, so limits stay shared. CORS is
+  configured on the API (`corsPreflight`) and never in the handler; `x-request-id` = `requestContext.requestId`. T7
+  checks from the explorer's origin whether a throttled `429` is readable cross-origin; if not, clients treat that
+  opaque failure as a back-off signal.
+- **Concurrency.** Before T7 the operator runs `aws lambda get-account-settings --region us-east-2` and reads the
+  inference profile's Bedrock quota; Lambda keeps 100 unreserved, so a low new-account limit makes any reservation
+  fail. Only chat is reserved, at R ≤ min(5, Bedrock RPM × p95 turn seconds ÷ 360); its route throttle is about R ÷ p95
+  turn seconds with burst R; the API function stays unreserved. Chat's timeout is 28 s and its deadline counts from
+  `requestContext.timeEpoch`, so cold start is included. MCP's per-instance text-search bucket rarely binds, since an
+  instance serves one request at a time.
+- **CloudFront.** `/tables/*` allows `GET`, `HEAD`, `OPTIONS`, with a response-headers policy for any origin that allows
+  `Range` and exposes `Content-Range`, `Accept-Ranges`, `Content-Length` and `ETag`, compression off and immutable
+  caching. The explorer's single-page routing is a viewer-request CloudFront Function, never a distribution-wide
+  error response that would turn a missing Parquet part into `index.html`. DuckDB-WASM's non-isolated bundle is
+  self-hosted as `application/wasm`.
+- **Mirror.** Objects are keyed `tables/<tables_cid>/<relative path>`; each part, 128 MB or less, is uploaded in a
+  single PutObject carrying the manifest's SHA-256 as `x-amz-checksum-sha256`, so S3 rejects mismatched bytes;
+  objects are immutable; only `/index.html` is invalidated per explorer deploy.
+- **Private data stays private.** The DuckDB file and the captures are in no CloudFront origin: in the image or the
+  private deploy bucket. Origin Access Control reads only the mirror and explorer buckets; every bucket has Block
+  Public Access, TLS-only and SSE-S3.
+- **Deploy-time build.** `packages/deploy-build` runs on the operator's machine before `cdk deploy`, where the export
+  output, the captures and the kit worktree are. It checks every table part against the manifest and every capture
+  against `sources[].sha256` and stops on a mismatch; writes the checkpointed file and a `deploy.json` with
+  `deploy_id` and `inputs_sha256`; skips the rebuild when `inputs_sha256` is unchanged; and stores its inputs in the
+  deploy bucket under SHA-256 keys. The TCAD live-read fallback needs US egress, so outside a VPN window it covers the
+  Socrata export only.
+- **OpenAPI.** OpenAPI 3.1 and the MCP tool schemas are generated from the Zod package; `openapi.json` is committed and
+  served unchanged; CI fails when the generated file differs from the committed one or a field named in the
+  contract's tables is missing. The CRM pins that file.
+- **Secrets and IAM.** The LangSmith secret is created out of band and imported by name, resolved at runtime with
+  caching, never as a Lambda environment variable; the section 13 Anthropic key the same way, only if used. The
+  PagerDuty URL and the chat kill-switch flag are free SSM standard parameters. Roles: the API function gets logs and
+  X-Ray only, no Bedrock and no S3 while the file is in the image; the chat function gets Bedrock invoke on the
+  profile and its foundation-model ARNs, `GetSecretValue` on one secret and `ssm:GetParameter` on the flag; the flag
+  writer gets `ssm:PutParameter` on that parameter; no function gets `aws-marketplace:*`. CDK template tests assert
+  each.
+- **Kill switch.** The daily-usage alarm sets the SSM flag through SNS and a small function; the chat handler reads the
+  flag with a short cache and answers `503 budget_exhausted`; an EventBridge Scheduler job clears it daily. Setting
+  reserved concurrency to zero is not used, because it would surface as gateway errors, not the contract's body.
+- **Observability and alerting.** 90-day retention on every log group, custom-resource functions included; HTTP API
+  access logs with `requestId`, `routeKey`, `status` and `integrationErrorMessage`; `QueryServed`, `QueryFailed` and
+  `ProcessingDuration` with `service`, `operation` and `status` dimensions, ids in metadata only. PagerDuty Free is
+  wired at T7 as the HTTPS subscriber of one SNS topic, email the second; at most ten self-resolving alarms (stage
+  5xx, errors and throttles per function, chat error rate, daily chat usage, the budget flag) to stay in the free
+  tier. CloudFront metrics exist only in `us-east-1`; that gap is accepted.
+- **CI.** A justfile with the kit's six recipes; a repo-local PR workflow running `prettier --check`, ESLint,
+  `tsc -b`, Vitest (with the OpenAPI snapshot and CDK assertions) and `cdk synth --strict` on the fixture DuckDB with
+  no lookups or credentials. `deploy` is run by the operator only, never on push.
+- **Cost table.** Standing lines at list price: S3 (mirror, deploy bucket, CDK assets), ECR image versions, each
+  Secrets Manager secret ($0.40 a month), alarms and dashboards beyond the free tier, log storage, and the Pinata
+  month. Per-request lines: Lambda, API Gateway, CloudFront, X-Ray, custom metrics, Bedrock. Plus the worst-case day at
+  the throttle and concurrency ceilings. Lifecycle rules and `cdk gc` keep per-deploy artifacts from piling up;
+  `project_name` is activated as a cost-allocation tag so Cost Explorer can back the table.
+- **Teardown and lifetime.** The stacks stay up with termination protection until the evaluation ends, since the
+  evaluator needs a live runtime. Then `cdk destroy` with explicit removal policies (the deploy bucket, images and log
+  groups go with the personal data they hold; the mirror can go because IPFS keeps the bytes) and `cdk gc`. The
+  README packet and its CIDs remain as the surviving proof.
+- **Verify action.** Per codec, the way `gateway_checks` works: file parts are fetched in full and compared by size and
+  SHA-256, hashed in a Worker; directory and large roots compare the `?format=raw` root block with the CID's
+  multihash. A gateway `?format=car` stream or a Release asset is never compared with the local CAR's SHA-256, since
+  block order differs and Release downloads are not readable cross-origin. dweb.link's redirect to its subdomain
+  origin is followed; a gateway timeout shows "unverified", not a mismatch. T8 confirms both gateways' CORS from the
+  live origin.
+- **README vs kit, satisfied both ways.** An external consumer versus tRPC: one Zod package generates REST, OpenAPI and
+  MCP. No ongoing cost versus DEV/PROD, domains and Amplify: one account, PR CI as the dev gate, operator-run deploys,
+  every standing line priced. No ongoing cost versus paging, 90-day logs and secrets: PagerDuty Free costs nothing,
+  id-only logs cost cents, the secret is priced. "Without Oracle-hosted database infrastructure" versus a Lambda
+  backend: the functions query an embedded file with no database server, and the DuckDB-WASM box queries the Parquet
+  with no Oracle compute at all. No ongoing cost versus a persistent runtime for the evaluation: the stacks stay up at
+  the quantified near-zero cost through the evaluation, then are destroyed.
+- **Effect on the plan.** T7 grows by the container image with the baked file, the two stacks, the generated OpenAPI,
+  the kill switch and the alarms: about 2 to 3 more hours. The contract's first T7 commit is the Zod package and the
+  committed `openapi.json`, which the CRM pins.
 
