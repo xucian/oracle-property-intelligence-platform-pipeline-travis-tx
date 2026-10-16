@@ -39,15 +39,15 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 | Distances | Miles, great-circle. Coordinates WGS84 `lat`, `lon`. |
 | Dates | ISO-8601. Date-only where the source is date-only. |
 | `source` | `{dataset, record_id, url, fetched_at, run_id, request_identifier, source_http_request}` on every record. `record_id` is the id as printed by the source. `request_identifier` and `source_http_request` (`{method, url, multiValueQueryString}`: the request that actually fetched the bulk file or page, never reconstructed) are the lexicon provenance fields. |
-| CIDs on records | `record_cid` = CID of the record's own lexicon block; `property_cid` = CID of the property's root; `data_group_cid` = CID of the data-group root for that property. All three are the columns `elephant-cli export-tables` writes. Group-level CIDs (`cid` = archive root, `schema`, `tables`) live on the run under `groups` and are not repeated per record. |
+| CIDs on records | `record_cid` = CID of the record's own lexicon block; `property_cid` = CID of the property's root; `data_group_cid` = CID of the data-group root for that property. `record_cid` is the tables' `cid` column renamed (the old `cid` meant the table's CID); `property_cid` and `data_group_cid` are the columns `elephant-cli export-tables` writes beside it, with `request_identifier`. Group-level CIDs (`cid` = archive root, `schema`, `tables`) live on the run under `groups` and are not repeated per record. |
 | `roof_work_class` | The Travis permit profile's fixture-tested mapping of exact source terms in `description`, `work_class` and `permit_class` to one of `primary_roof_replacement`, `primary_roof_new_construction`, `repair_or_coating`, `accessory_roof`, `other`, `needs_review`; `work_classifier_version` names the profile version. No regex is applied at query time. Unmapped or contradictory text is `needs_review`. Trade permits (`EP`, `MP`, `PP`) are `other`. |
 | Roofing permit | `is_roofing` = `roof_work_class` in {`primary_roof_replacement`, `primary_roof_new_construction`, `repair_or_coating`, `accessory_roof`}. Drives the open/stalled permit signal and the counts. `needs_review` rows are neither roofing nor not: they are excluded from the signal and counted separately. |
 | Re-roof permit | `is_reroof` = `roof_work_class = primary_roof_replacement`. The only class that may reset a roof's age. |
-| Roof age | Computed by the kit's estimator (`elephant.roof-age-estimate.v1`). Anchor: the `completed_date` or close date of the latest completed `primary_roof_replacement` → `roof_age_basis = completed_replacement`, `roof_age_confidence = high`; else of a completed `primary_roof_new_construction` → `new_construction`, `medium`; else `year_built` → `year_built`, `low`; else `null`, `none`. Open permits, repairs, coatings and accessory roofs never reset age. No date is synthesized: a permit without a valid completion or close date is not an anchor whatever its status, and `issued_date` is never used. `roof_year` = year of the anchor; `roof_age_years` = year of `roof_age_as_of` − `roof_year`. `roof_age_anchor` = `{permit_id, date, date_field}` for a permit anchor, `{source_field: "year_built"}` for the built-year fallback, or null; `roof_age_caveats[]` carries the estimator's codes (for example `partial_history`). |
+| Roof age | Computed by the kit's estimator (`elephant.roof-age-estimate.v1`). Anchor: the `completed_date` or close date of the latest completed `primary_roof_replacement` → `roof_age_basis = completed_replacement`, `roof_age_confidence = high`; else of a completed `primary_roof_new_construction` → `new_construction`, `medium`; else `year_built` → `year_built`, `low`; else `null`, `none` (these `roof_age_basis` values are the API's names for the estimator's eligibility reason codes; the mapping is fixed in the profile fixtures). Open permits, repairs, coatings and accessory roofs never reset age. No date is synthesized: a permit without a valid completion or close date is not an anchor whatever its status, and `issued_date` is never used. `roof_year` = year of the anchor; `roof_age_years` = year of `roof_age_as_of` − `roof_year`. `roof_age_anchor` = `{permit_id, date, date_field}` for a permit anchor, `{source_field: "year_built"}` for the built-year fallback, or null; `roof_age_caveats[]` carries the estimator's codes (for example `partial_history`). |
 | Age threshold | "Older than N years" is **strict**: a property matches when `roof_age_years > roof_age_min`. |
-| Status group | From the profile's exact mapping of `status_current`: `open` = `Active`, `Pending Permit`, `On Hold`, `Re Review`, `Suspended`, `Inactive Pending Revision`. `stalled` = `Expired` with `completed_date_evidence` other than `confirmed_present`. `closed` = `Final`, `Withdrawn`, `Cancelled*`, `VOID`, `Aborted`, and `Expired` with a confirmed `completed_date`. **`needs_review`** = any value outside the mapping. `needs_review` rows are excluded from the `open`, `stalled` and `closed` counts and from the open-permit signal; their count is `/v1/meta.counts.permits_needs_review` and the values are listed under `limitations`. |
-| Status evidence | `status_observed_at` = the source's `:updated_at` for the row, else `fetched_at`. `status_evidence` = `indexed` (the Socrata export) or `live` (the permit's public page). v1 serves `indexed` only; live refresh of open roofing permits is a listed limitation. |
-| `completed_date_evidence` | `confirmed_present` (a valid date in the export), `unknown` (blank in the export: a blank listing column is not a confirmed empty), `invalid_quarantined` (an impossible or malformed date; the raw value stays in `source`), `confirmed_empty` (only after a detail lookup, never in v1), `unavailable`. |
+| Status group | From the profile's exact mapping of `status_current`: `open` = `Active`, `Pending Permit`, `On Hold`, `Re Review`, `Suspended`, `Inactive Pending Revision`. `stalled` = `Expired` with `completed_date_evidence` other than `confirmed_present`. `closed` = `Final`, `Withdrawn`, the exact `Cancelled …` values the export prints (enumerated in the profile fixtures), `VOID`, `Aborted`, and `Expired` with a confirmed `completed_date`. **`needs_review`** = any value outside the mapping. `needs_review` rows are excluded from the `open`, `stalled` and `closed` counts and from the open-permit signal; their count is `/v1/meta.counts.permits_needs_review` and the values are listed under `limitations`. The profile maps lifecycle status for the roof-age estimator separately: only `Final` is `completed`; `Withdrawn`, `Cancelled`, `VOID`, `Aborted` and `Expired` are `other`, so `closed` never reads as completed work. |
+| Status source | `status_observed_at` = the source's `:updated_at` for the row, else `fetched_at`. `status_source` = `indexed` (the Socrata export) or `live` (the permit's public page); it names where the value was observed and is not one of the kit's evidence states. v1 serves `indexed` only; live refresh of open roofing permits is a listed limitation. |
+| `completed_date_evidence` | `confirmed_present` (a valid date in the export), `unknown` (blank in the export: a blank listing column is not a confirmed empty), `invalid_quarantined` (an impossible or malformed date; the raw value stays in `source`), `confirmed_empty` (only after a detail lookup, never in v1), `unavailable`, `stale`, `conflicting`: the kit's seven-state vocabulary, of which `stale` and `conflicting` are unused while v1 serves indexed values only. |
 | `open_since` | `issued_date`, else `applied_date`; `open_since_basis` says which. |
 | `open_duration_days` | `open`: today − `open_since` (`open_duration_basis: today`). `stalled`: `expires_date` − `open_since` (`expires_date`), or `statusdate` − `open_since` when `expires_date` is missing (`statusdate`): how long it stayed open before lapsing. `closed` and `needs_review`: `null`. |
 | `days_since_expiry` | `stalled` only: today − `expires_date`; `null` otherwise. |
@@ -80,21 +80,28 @@ server derives the exact box from the loaded parcels) is valid and returns `200`
              "property_improvement": {"cid": "bafy…", "schema": "bafy…", "tables": "bafy…"}},
   "manifest_cid": "bafy…",
   "atlas": null,
-  "limitations": [{"source": "bbb.org", "source_access_status": "blocked", "incomplete_reason": "http_403_source_block",
+  "evidence_states": {"completed_date": {"confirmed_present": 0, "unknown": 0, "invalid_quarantined": 0},
+                      "status_current": {"confirmed_present": 0, "unknown": 0},
+                      "tcad_id": {"confirmed_present": 0, "invalid_quarantined": 0}},
+  "unlinked_reasons": {"no_candidate": 0, "multiple_candidates": 0, "invalid_quarantined": 0},
+  "limitations": [{"source": "bbb.org", "availability": "unsupported", "source_access_status": "blocked", "incomplete_reason": "http_403_source_block",
                    "detail": "…", "evidence": "runs/…", "records_request": null}],
   "cli_commit": "…", "lexicon_manifest_url": "…", "kit_commit": "99c7bff"
 }
 ```
 
 `groups` holds one entry per published data group with the three CIDs the Atlas page entry holds (archive
-root `cid`, `schema`, `tables`). `atlas` is `{ipns, index_cid, merged, pr_url}` once the county page is merged
-into Atlas: `ipns` is the global `elephant-atlas` name and `index_cid` its resolved value for this run; before
-the merge it is `null`. No IPNS name is minted for this dataset. `counts.permit_contractor_attributions` counts
+root `cid`, `schema`, `tables`). `atlas` has the Run schema's shape (`page_path`, `pr_url`,
+`validate_state`, `merge_state`, `revert_issue_url`, `ipns`, `index_cid`, `mcp_sync`): `ipns` is the global
+`elephant-atlas` name and `index_cid` its resolved value once the county page is merged; before the PR is
+opened the object is `null`. No IPNS name is minted for this dataset. `counts.permit_contractor_attributions` counts
 distinct `contractor_attribution_key` values, not contractor entities; `counts.registry_rows_loaded` counts
-Comptroller rows loaded as candidates, not linked identities. `limitations[].source_access_status` is one of
-`blocked`, `unsupported`, `supported_partial`, `supported_full`; `records_request` is the kit's
+Comptroller rows loaded as candidates, not linked identities, and is 0 unless a `corporate_registry` group is
+published. `limitations[]` carries both `availability` (`unsupported`, `supported_partial`, `supported_full`)
+and `source_access_status` (`blocked` while a source block stands), as `sources[]` does; `records_request` is the kit's
 `{recipient_office, request_portal_url | request_email, system_scope, route}` for blocked, custodian-only and
-manual-only jurisdictions.
+manual-only jurisdictions. `evidence_states` gives the per-field evidence-state counts for `completed_date`,
+`status_current` and `tcad_id`; `unlinked_reasons` counts the permits that could not be linked, by reason.
 
 ### `GET /v1/search-centers`
 
@@ -220,13 +227,14 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | `permit_id` | string | as printed (`permit_number`) |
 | `geo_id` | string or null | `tcad_id` as printed |
 | `property_id` | string or null | resolved through `geo_id`; null when zero or several parcels match |
-| `property_link` | `{method: "exact"|"normalized_digits", normalization_version, confidence}` or null | how the link was made; null when unlinked |
+| `property_link` | `{match_method: "exact"|"normalized_digits", normalization_version, confidence}` or null | how the link was made; null when unlinked |
+| `unlinked_reason` | `no_candidate`, `multiple_candidates`, `invalid_quarantined` or null | set only when `property_id` is null |
 | `permit_type`, `permit_class`, `work_class`, `description` | string | as printed |
 | `roof_work_class`, `work_classifier_version` | see definitions | |
 | `is_roofing`, `is_reroof` | bool | derived from `roof_work_class` |
 | `status` | string | `status_current` as printed |
 | `status_group` | `open`, `stalled`, `closed`, `needs_review` | |
-| `status_observed_at`, `status_evidence` | | see definitions |
+| `status_observed_at`, `status_source` | | see definitions |
 | `applied_date`, `issued_date`, `expires_date`, `completed_date` | date or null | as printed; a null `completed_date` is not a confirmed empty |
 | `completed_date_evidence` | see definitions | |
 | `open_since`, `open_since_basis`, `open_duration_days`, `open_duration_basis`, `days_since_expiry` | | see definitions |
@@ -234,7 +242,7 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | `bbb` | `{rating, status, incomplete_reason, note}` | |
 | `lat`, `lon` | number or null | permit coordinates |
 | `source` | `{dataset: "austin-issued-construction-permits/3syk-w9eu", record_id, url, fetched_at, run_id, request_identifier, source_http_request}` | `url` = the permit's public page |
-| `record_cid`, `property_cid`, `data_group_cid` | string or null | null for permits not in the published `property_improvement` group (query tables only) |
+| `record_cid`, `property_cid`, `data_group_cid` | string | always present: the API serves only permits in the published `property_improvement` group |
 | `match_snippet`, `score` | | text-search results only |
 
 **PermitDetail** = PermitSummary + `property: PropertySummary|null` + `applicant` (as printed) + `valuations` (optional).
@@ -247,7 +255,7 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | `identity_status` | `"source_name_attribution"` in v1 |
 | `company_name`, `printed_names[]`, `trade`, `phone`, `address` | from permits, as printed (business contact fields of a public record; see decisions.md section 4) |
 | `permit_count`, `open_permit_count`, `roofing_permit_count`, `needs_review_permit_count` | int |
-| `registry_candidates[]` | `{source: "tx-comptroller-franchise-tax/9cir-efmm", taxpayer_number, name, match_method: "exact_unique_normalized_name", status: "candidate"}`; review candidates only, never identity |
+| `registry_candidates[]` | `{source: "tx-comptroller-franchise-tax/9cir-efmm", taxpayer_number, name, match_method: "exact_unique_normalized_name", status: "candidate"}`; review candidates only, never identity; empty unless a `corporate_registry` group is published |
 | `official_identity` | null in v1; `{company_cid, license_identifier, source}` once an official registry or licensing record matches |
 | `bbb` | `{rating, status, incomplete_reason, note}` |
 
@@ -261,7 +269,8 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | `loader_watermarks[]` | `{track, path, artifact_hash, merged_count, last_merged_at}` per track (appraisal, permits, registry) |
 | `tombstones_consumed` | `{dead, invalid}` |
 | `counts`, `deltas` | per table: loaded, new, changed, unchanged, dead, invalid, retryable; appraisal reconciles as `seed = ready + dead + invalid` |
-| `limitations[]` | `{source, source_access_status, incomplete_reason, detail, evidence, records_request}` |
+| `limitations[]` | `{source, availability, source_access_status, incomplete_reason, detail, evidence, records_request}` |
+| `evidence_states`, `unlinked_reasons` | as in `/v1/meta` |
 | `groups` | `{<group>: {cid, schema, tables}}`, one entry per published data group (CIDv1 base32) |
 | `manifest_cid` | CIDv1 base32 |
 | `atlas` | `{page_path, pr_url, validate_state, merge_state, revert_issue_url, ipns, index_cid, mcp_sync}` or null; `ipns` is the global `elephant-atlas` name |
@@ -284,11 +293,17 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
   `source_http_request`; `/v1/places` and `resolve_place` → `/v1/search-centers` and `resolve_search_center`;
   the regex tiers → `roof_work_class` and `work_classifier_version`; roof age gains confidence, anchor, as-of
   and caveats and loses the `issued_date` fallback; `status_group` gains `needs_review` and loses the default
-  rule; `status_observed_at`, `status_evidence`, `completed_date_evidence`, `open_since_basis`,
+  rule; `status_observed_at`, `status_source`, `completed_date_evidence`, `open_since_basis`,
   `open_duration_basis` and `property_link` added; `bbb.status` distinguishes `blocked` from `unavailable`;
   `counts.contractors` and `counts.businesses` → `permit_contractor_attributions` and `registry_rows_loaded`,
   with `permits_unmatched`, `permits_needs_review` and `roofing_permits_needs_review` added; `limitations[]`
   typed; Run gains `loader_watermarks[]`, `tombstones_consumed`, `atlas`, CAR validation and readback fields,
   `readiness_report`, `cli_commit`, `lexicon_manifest_url` and `kit_commit`.
+- 2026-10-16, second look (`docs/reviews/2026-10-16-oracle-second-look.md`): one `atlas` shape; `limitations[]`
+  carries `availability` and `source_access_status`; `property_link.method` → `match_method` plus
+  `unlinked_reason`; `record_cid` wording; the seven evidence states; `status_evidence` → `status_source`;
+  lifecycle mapping stated; `Cancelled*` enumerated in fixtures; `record_cid` always present (no
+  query-tables-only rows); `registry_candidates` conditional on a published group; `evidence_states` and
+  `unlinked_reasons` on `/v1/meta` and Run.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.

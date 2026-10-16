@@ -31,7 +31,54 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
   2026-10-16), `mew` (lexicon modeling), `alakazam` (retrieval design), `metagross` (hosted layer); `slowking`
   self-assessment after hosting. Each review is recorded under `docs/reviews/` and its corrections are applied
   to this file and to `api-contract.md` before the next review starts.
-- Work follows `guide-product-work`: feature increments, each run and inspected by the operator before the next.
+- Work follows `guide-product-work`: feature increments, each run and inspected by the operator before the
+  next. The kit sets **at least four increments as a floor** for a full build, never a target. The kit's product
+  catalog has no `iterationGuide` for Oracle, so the capability map is `onboard-county`'s stage order plus the
+  README's acceptance criteria; it yields the ten increments below, each a user-visible capability with a stable
+  id, its dependencies and one acceptance check. `county-ingest-run`'s numbered run stages (pilot, feasibility
+  gate, full run, ramp-up, failure handling, streamed load, redrives, wrap-up) are the procedure inside T2–T5,
+  not increments of their own. Progress is kept in `docs/progress.md`, one row per increment (`pending`,
+  `prepared`, `observed`, `verified`); for the local-Restate increments the inspection checkpoint is the Restate
+  UI and the validator or run-record JSON, and AWS inspection applies from T7.
+  1. **T1 Readiness** (`county-discovery`, `county-readiness-preflight`, `county-seed-data`; no dependency):
+     `travis-sources.yaml` with every jurisdiction classified, the records requests, the approved exceptions,
+     the privacy classification of the permit contact fields and the BBB access request; the seed script and
+     its row count. Check: the validator prints `PASS` with `seed_allowed` true.
+  2. **T2 Appraisal transform and appraisal-only pilot** (`county-appraisal-onboarding`,
+     `build-county-transform`, `county-ingest-run`; after T1): bulk capture materialized per parcel, one parcel
+     through `Parcel.process`, field-coverage and validation proof, the ~25-parcel pilot run with the
+     `__NONE__` eligibility sentinel (no permit harvest yet) and per-source timings. Check: `elephant-cli
+     validate` clean on the pilot `county` group, pilot timings in the run record.
+  3. **T3 Official identity baseline** (`onboard-county` stage 6; after T1): the Comptroller file loaded as
+     registry candidates under the SOS approved exception; the TDLR and TSBPE licensing snapshot for the
+     trade-permit rows that print a license number, or the recorded operator decision to proceed without one
+     (Texas issues no roofing license; whether the Socrata export prints a license number is checked in
+     discovery). Check: snapshot counts and freshness in the run record; no `PermitFeed` has started.
+  4. **T4 Permit profile, permit pilot and feasibility** (`county-permit-adapter`, the
+     `query-db-loading-matching` link rules; after T2 and T3): the Socrata harvester, the Travis permit
+     profile (status, lifecycle and work-class mappings with fixtures, the `geo_id` link proof), the pilot
+     re-run with `__ALL__` to exercise the permit, permit-less and failure paths, then the 1,000-parcel
+     feasibility run with the 48-hour projection. Check: fixtures pass; link-method counts and the projection
+     in the run record.
+  5. **T5 Full run, reconciliation and signals** (`county-ingest-run`, `query-db-loading-matching`, the
+     roof-age estimator; after T4): the backpressure-aware full run, Loader watermarks and tombstones,
+     roof-age estimates, evidence-state counts, `runs/<run_id>.json`. Check: `seed = ready + dead + invalid`,
+     counts per table, limitations listed.
+  6. **T6 Publication, run 1** (`use-oracle`; after T5): per group validate → hash → validate CAR →
+     export-tables → upload with readback; manifest, second pin, gateway checks, Atlas PR. Check: every root
+     fetched from two public gateways with matching digests; the Atlas PR URL recorded.
+  7. **T7 Hosted query layer** (`metagross`; after T6): the deploy-time DuckDB from the uploaded tables, the
+     Lambda with REST `v1` and MCP. Check: `/v1/openapi.json` equals the contract, one MCP tool call answers,
+     Lambda logs inspected.
+  8. **T8 Explorer** (after T7): the static explorer with its Verify action and query panels. Check: the
+     README demo transcript steps 1–7 on the live URL; CloudFront and S3 inspected.
+  9. **T9 Agent** (after T7): the Bedrock agent behind `/v1/agent/chat` with the `v1` tools. Check: the two
+     README agent prompts answered with cited ids and CIDs; Lambda and Bedrock usage inspected. Kept separate
+     from T8 because it is a different concept with a different inspection point.
+  10. **T10 Incremental refresh** (`continuous-ingestion`; after T6, demonstrated after T7): the windowed
+      delta capability: change detection per source watermark, tombstones, the stale-snapshot queue, new group
+      roots and multi-run history, shown by run 2. Check: a non-zero delta, both runs in `/v1/runs`, the old
+      roots fetched again from both gateways.
 
 ## 3. Ingestion runtime
 
@@ -44,8 +91,10 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
   contractor-identity note, the seed-producing script and a replay fixture under 1 MB (`fixtures/travis-replay/`,
   with a few-row `seed.csv`) are **mirrored into this repository under `oracle/travis/`** with a script that
   copies them into a kit checkout, so a reviewer can rerun from this PR. The full seed CSV, captures, hashed
-  output, CARs and Parquet are never committed, here or in the kit (the kit gitignores `data/`, including
-  `seeds/`); tracked runtime files stay under 512 KiB. The county transform is also offered as a PR to the public
+  output, CARs and Parquet are never committed, here or in the kit. At `99c7bff` the runtime's `.gitignore`
+  does not cover `data/` (`bootstrap-oracle-infra` describes it as ignored, but `git check-ignore` matches
+  nothing), so the first commit on the `travis` branch adds `data/` to `skills/use-oracle/runtime/.gitignore`
+  and the kit's clean-room gate is the proof; tracked runtime files stay under 512 KiB. The county transform is also offered as a PR to the public
   [elephant-xyz/Counties-trasform-scripts](https://github.com/elephant-xyz/Counties-trasform-scripts) repository,
   as the kit prescribes; its merge depends on that repository's maintainers and this submission does not wait for it.
 - **Bulk-first capture.** The kit's default appraisal path captures one appraiser page per parcel. For Travis
@@ -54,7 +103,10 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
   input per parcel from those rows, so the kit's per-property transform, validate and hash flow runs
   unchanged. Provenance is the kit's: every entity carries `source_http_request` describing the bulk-file GET
   that was actually made (method, URL, query; never reconstructed after the fact) and `request_identifier` =
-  `PROP_ID` as printed; the row locator and fetch time ride in the run record. `travis-sources.yaml` records
+  `PROP_ID` as printed; the row locator and fetch time ride in the run record. For `property_improvement`
+  entities the `source_http_request` is the Socrata export GET that was actually made and `request_identifier`
+  stays the linked parcel's `PROP_ID`: the seed row's request is the default for every entity of that parcel,
+  and the export GET is recorded because it was made, never reconstructed. `travis-sources.yaml` records
   "bulk" as the appraisal access method and the publication rights of the TCAD, Socrata and Comptroller files.
   One parcel is still run through the runtime's `Parcel.process` to prove the per-property flow. No per-parcel
   appraiser-page capture unless a required field is absent from every bulk source, and then only for the
@@ -62,16 +114,22 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
 - **Readiness gate.** `county-readiness-preflight` validates `travis-sources.yaml` after discovery and again
   immediately before seed, before the pilot and before the full run. A BLOCKED gate stops seed, pilot and full
   ingest, not preparation. The entries Travis needs to pass are named in sections 4 and 13.
-- **Pilot, then feasibility, then full run.** First the kit's pilot: about 25 representative parcels
+- **Identity baseline, pilot, feasibility, full run.** First the kit's pilot: about 25 representative parcels
   (commercial and residential, with and without permits) through capture, transform, validate, hash and load,
-  verifying the permit-less, residential-skip and failure paths and recording per-source latency, safe
-  concurrency and failure rate. Then the feasibility increment: 1,000 parcels and their permits through the
-  same stages, recording rows per minute per stage and the projected full-county duration against the kit's
-  48-hour gate. The lexicon `property_improvement` scope is set from those numbers: all permits always go into
-  the query tables; `property_improvement` records start with building permits plus every permit that links to
-  a parcel, and widen only if the measured throughput allows it before the publish deadline. While any permit
-  class is excluded the group's availability is typed `supported_partial`, with the excluded classes and their
-  counts in the run record.
+  run appraisal-only with the `__NONE__` eligibility sentinel before any permit harvest, verifying the
+  residential-skip and failure paths and recording per-source latency, safe concurrency and failure rate.
+  Permits are never harvested before the official identity baseline is loaded (section 2, T3; the kit forbids
+  harvesting first or in parallel). With the baseline loaded and the adapter built, the pilot is re-run with
+  `__ALL__` to exercise the permit and permit-less paths. Then the feasibility increment: 1,000 parcels and
+  their permits through the same stages, recording rows per minute per stage and the projected full-county
+  duration against the kit's 48-hour gate. The lexicon `property_improvement` scope is set from those numbers.
+  Every permit row is loaded into the internal Query DB for reconciliation, but only a permit that links to a
+  parcel can be published at all (an archive is property-rooted), and the hosted API serves exactly the
+  published `property_improvement` scope: unlinked and excluded permits appear as counts and limitations,
+  never as rows. `property_improvement` records start with building permits that link to a parcel and widen
+  only if the measured throughput allows it before the publish deadline. While any permit class is excluded
+  the group's availability is typed `supported_partial`, with the excluded classes and their counts in the
+  run record.
 - No rebuild of Oracle from scratch, no replacement of Restate by Step Functions, no generated records.
 
 ## 4. Sources (seed list; `county-discovery` verifies, extends and records the evidence)
@@ -85,8 +143,8 @@ confirm the TCAD export, the TNR parcel layer and data.texas.gov all answer, bef
 | Permits, rest of county | Every Travis jurisdiction is enumerated in `travis-sources.yaml`: unincorporated Travis County (its development-services permit system), each municipality, the jurisdictions whose permits are inside the Austin feed (classified `delegated`) and the ETJ handling, each with a classification and a `historical_records` flag; the Austin one-stop is never marked as countywide history. Every `blocked`, `custodian-only` or `manual-only` row carries a complete `records_request` (recipient office, portal URL or email, system and date scope, `api-first` or `records-first`), filed before the full run. A block or absence is reported per jurisdiction with that request on record; a limitation note alone leaves the permit gate BLOCKED. | to enumerate and classify in discovery |
 | Parcels, ownership, year built, deed/sale date | TCAD public exports at traviscad.org/publicinformation: 2026 Certified Appraisal Export (July), 2026 Supplemental Appraisal Roll Exports, Improvement Details 2026, Export Layout zip. Listed as downloads; cost not stated on the page. Both `PROP_ID` and `geo_id` are expected in the roll. If the files are paid, the purchase is a human payment decision recorded in the run record (section 13). | page reachable; the file host returns 403 outside the US (geo-block or paywall: resolve under VPN first) |
 | Coordinates | In this order: (1) Travis County TNR parcel layer `gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdictions/TCAD_public/FeatureServer/0` (fields include `PROP_ID` and `geo_id`, 1,000 features/request) → centroid per parcel; (2) the county GIS parcel shapefile download if the service blocks bulk paging; (3) the City of Austin parcel layer on its ArcGIS organization or data.austintexas.gov. Secondary for parcels with no geometry: permit `latitude`/`longitude`. **No geocoding, no invented coordinates.** If no source yields parcel centroids under US egress, radius search covers only permit-located parcels and that coverage number is reported as a limitation. | (1) blocked outside the US |
-| Business records | Texas Comptroller "Active Franchise Tax Permit Holders", data.texas.gov `9cir-efmm` (~3M rows, filter Travis). The Texas SOS is the official corporate registry and is paid: using the Comptroller file instead is recorded in `travis-sources.yaml` as an approved exception, with the SOS purchase as a human payment decision. Comptroller rows load as registry candidates only (section 5). If they are published as a `corporate_registry` group, each company's `source_http_request` is the per-taxpayer detail GET on the Comptroller site, never the bulk file page. | portal blocked outside the US |
-| Contractors | From permit rows: `contractor_full_name`, `contractor_company_name`, `contractor_phone`, address, `contractor_trade`, kept raw on the `property_improvement` record as **source-name attribution**. They are not identity: the kit treats name, phone and address matches as candidates, excludes phone from identity matching, and writes no `company`, `person` or `license` record and no `property_improvement_has_contractor` edge without an official registry or licensing match. Texas issues no state roofing license (recorded as a gap). The official authorities named in the county profile before permit harvest are the Texas SOS (corporate registry; see the row above), TDLR (electrical and HVAC licenses) and TSBPE (plumbing) for trade permits. A Comptroller exact unique normalized-name hit is a review candidate (`registry_candidates`), never identity. Official identity is null in v1 unless an official record matches. Contractor phone and address are business contact fields printed on the public permit record and are returned as printed; personal phone and email fields are not collected. That PII decision is recorded here and can be reversed before hosting. | derived, attribution only |
+| Business records | Texas Comptroller "Active Franchise Tax Permit Holders", data.texas.gov `9cir-efmm` (~3M rows, filter Travis). The Texas SOS is the official corporate registry and is paid: using the Comptroller file instead is recorded in `travis-sources.yaml` as an approved exception, with the SOS purchase as a human payment decision. Comptroller rows load as registry candidates only (section 5). If they are published as a `corporate_registry` group, each company's `source_http_request` is the per-taxpayer detail GET on the Comptroller site, never the bulk file page. The API's `registry_candidates` and `registry_rows_loaded` exist only if that group is published, as a deploy-time derivation over published groups; otherwise both are empty. | portal blocked outside the US |
+| Contractors | From permit rows: `contractor_full_name`, `contractor_company_name`, `contractor_phone`, address, `contractor_trade`, kept raw on the `property_improvement` record as **source-name attribution**. They are not identity: the kit treats name, phone and address matches as candidates, excludes phone from identity matching, and writes no `company`, `person` or `license` record and no `property_improvement_has_contractor` edge without an official registry or licensing match. Texas issues no state roofing license (recorded as a gap). The official authorities named in the county profile before permit harvest are the Texas SOS (corporate registry; see the row above), TDLR (electrical and HVAC licenses) and TSBPE (plumbing) for trade permits. A Comptroller exact unique normalized-name hit is a review candidate (`registry_candidates`), never identity. Official identity is null in v1 unless an official record matches. Contractor phone and address are business contact fields printed on the public permit record and are returned as printed; personal phone and email fields are not collected. That privacy classification is recorded in `travis-sources.yaml` as the kit asks and can be reversed before hosting; whether the printed contact fields enter a published record or only the hosted API depends on the open decision in section 5, since `property_improvement` has no property for them. | derived, attribution only |
 | BBB ratings | bbb.org returns a bot challenge and 403 to scripted access (probed 2026-10-16 from outside the US, which the kit does not accept as evidence). Per `bbb-harvest`: one bounded probe from the approved AWS US-egress runtime (`operator_machine: false`), keep the evidence, stop on 403, no proxies, challenge evasion or third-party scrapers, and request approved access through the official API at developer.bbb.org; the request (date, scope, recipient) is recorded in the run manifest. Coverage carries `source_access_status: blocked`, `source_access_complete: false`, `incomplete_reason: http_403_source_block`. BBB fields ship as `rating: null`, `status: blocked`. | blocked, access requested |
 
 **US egress.** TCAD files, the Travis GIS server and data.texas.gov reject non-US clients. Ingestion runs with US
@@ -98,7 +156,8 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
 ## 5. Canonical model and reconciliation
 
 - Records are produced as lexicon records by the kit runtime and validated against the live lexicon before
-  hashing. Classes: `property`, `parcel`, `address`, `company`, `person`, and **`property_improvement`** for
+  hashing. Classes: `property`, `parcel`, `address`, `company` and `person` (in v1 these two
+  are the roll's owners in the `county` group, never contractors), and **`property_improvement`** for
   permits. The lexicon has no `permit` class: the kit's permit transform emits the `property_improvement` data
   group, whose properties include `permit_number`, `permit_issue_date` and `permit_close_date`. Links:
   `property_has_property_improvement` and `parcel_has_property_improvement`;
@@ -114,7 +173,9 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
   first. The strip-non-digits comparison is a fallback used only after the Travis permit profile proves it
   one-to-one over the roll (no two `geo_id` values collapse) and records the normalization version; every link
   carries `match_method` (`exact` or `normalized_digits`), `normalization_version` and `confidence`; a permit
-  with zero or several candidates stays valid-unlinked (`property_id` null) and is counted. No digits-only value
+  with zero or several candidates, or a malformed `tcad_id` (`invalid_quarantined`, raw value kept), stays
+  valid-unlinked (`property_id` null) with an `unlinked_reason` of `no_candidate`, `multiple_candidates` or
+  `invalid_quarantined`, each counted. No digits-only value
   is ever a conflict key. Permit ↔ contractor = the printed fields (attribution). Contractor ↔ business =
   registry candidate only. No fuzzy link sets a public flag.
 - Provenance on every record: the lexicon `source_http_request` and `request_identifier` (section 3), dataset
@@ -139,19 +200,43 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
     exposed by the API.
   - Status groups come from the profile's exact mapping of `status_current`. Any unmapped value is
     `needs_review`: excluded from the `open`, `stalled` and `closed` counts and from the open-permit signal,
-    and counted under limitations. Status evidence in v1 is the indexed Socrata value with its observation time
-    (`status_evidence: indexed`); live detail refresh of open roofing permits is not done in v1 and is listed as
-    a limitation.
+    and counted under limitations. The status in v1 is the indexed Socrata value with its observation time
+    (`status_source: indexed`); live detail refresh of open roofing permits is not done in v1 and is recorded
+    in the permit-evidence gap ledger as a limitation of the open-permit lead decision.
   - A blank `completed_date` in the export is `unknown` evidence (a blank listing column is not a confirmed
     empty); a valid date is `confirmed_present`; an impossible date is `invalid_quarantined` with the raw value
     kept. `stalled` therefore means "expired with no completion evidence".
+  - Lifecycle status for the estimator is mapped by the profile separately from `status_group`: only `Final`
+    maps to `completed` and can anchor; `Withdrawn`, `Cancelled`, `VOID`, `Aborted` and `Expired` map to
+    `other`, so a `closed` permit is never read as completed work.
+  - The estimator runs twice with the same frozen profile: in Query DB reconciliation (the kit's internal
+    lineage) and at deploy over the published fields. The Travis transform does not pass `roofAge` to the
+    runner, so no `structure.roof_date` or `roof_age_years` is published, and the two runs' counts must
+    reconcile.
+  - Per-field evidence-state counts for `completed_date`, `status_current` and `tcad_id` are written to the
+    run record and exposed by `/v1/meta`, so the basis of every `stalled` or unlinked row is countable.
+  - **Open decision for the `mew` review (blocks the hosted-layer design).** The product fields the README
+    needs on a permit (`description`, the printed `status_current`, `expires_date`, the printed contractor
+    fields, and therefore text search) have no `property_improvement` property: the class carries the permit
+    dates, `fee`, `contractor_type`, the owner-builder and disaster flags and the enums `improvement_type`,
+    `improvement_action` and `improvement_status`. The transform keeps such fields in `source_payload` as
+    lexicon gaps, which `export-tables` does not write. The options, to be decided before T4 is built:
+    (i) classify at transform time into the three enums, make the API's `roof_work_class` and `status_group`
+    deploy-time projections of them, and list the homeless fields as lexicon gaps the hosted layer cannot
+    serve (the README's contractor name and free-text search would then be unmet); (ii) have the deploy-time
+    build also read the published archive blocks, if `mew` confirms that `source_payload` survives
+    validate → hash into the CAR; (iii) have the deploy-time build re-read the public Socrata export for the
+    non-lexicon columns, keyed by `permit_number` and joined to the published `record_cid`, with its own
+    `source_http_request` and shown as source-backed but unpublished fields. Recommendation: (ii) if it holds,
+    else (iii); never the Query DB.
 - A small deploy-time **search-center** table holds, for every distinct situs city and situs ZIP in the roll,
   the centroid of its parcels with coordinates and the parcel count. It is the only way a place name becomes a
   search center; no external geocoder is called. It is not published, and it is not the kit's `places`
   (Overture) data group, which v1 does not produce.
-- At deploy, one DuckDB database file is built from the Atlas-published, CID-verified `export-tables` output
-  (never from the Query DB): every published table loaded, the derived tables above, plus a full-text index
-  over building permits' `description`, `permit_class` and `work_class` that backs `/v1/permits/text-search`.
+- At deploy, one DuckDB database file is built from the uploaded-with-readback, CID-verified `export-tables` output
+  (the roots the Atlas page entry carries; the Atlas merge is not a dependency; never the Query DB): every published table loaded, the derived tables above, plus a full-text index
+  over building permits' `description`, `permit_class` and `work_class` that backs `/v1/permits/text-search`
+  (which source supplies those non-lexicon columns is the open decision above).
   The file is stored in S3 beside the Parquet mirror, downloaded once per Lambda instance into ephemeral storage
   (sized to the file, 2 GB) and reused across warm invocations, so queries never range-read S3 per request. It
   is a deployment artifact, not a published one; the Parquet mirror is what the browser reads. No provisioned
@@ -196,8 +281,10 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
    expressed as counts inside the manifest (the README's "coverage"); the CountyIndex and CountyTables roots are
    its "indexes"; one property's data-group root CID is its "sample extract". No Query DB export, coverage
    object, overlay or derived table is listed or uploaded. A `cars[]` section lists, per group, the archive CAR
-   and `tables.car` with `root_cid`, `group`, `schema_cid`, `block_count`, `car_validation` counts, `path`,
+   and `tables.car` with `root_cid`, `group`, `kind` (`archive` or `tables`), `schema_cid`, `block_count`, `car_validation` counts, `path`,
    `size`, `sha256` and `readback_url` (the CAR file is an export of the root, not a separately pinned object).
+   The manifest is a README-packet descriptor, pinned so the packet can verify itself; it is never referenced
+   from the Atlas page or served as a registry, and consumers read the global Atlas IPNS.
    Second pin: Pinata **pin-by-CID** of every root after the Filebase upload, which preserves the CIDs by
    construction; each pin is confirmed complete before the gateway checks, and if a pin-by-CID stalls the
    fallback vendor is Storacha with a CAR upload. Pinata's free tier is 1 GB, so a paid month is budgeted if two
@@ -319,3 +406,11 @@ Applied in place before implementation; the review and every citation are in
 - §13: GIS-only roll contingency requires an `approved_exceptions` entry.
 - §3, §6: bulk-capture provenance rule; Loader watermarks and tombstones in the run record.
 - §2: review order recorded; §8, §9: `places` renamed to search centers.
+- Second look, same day (`reviews/2026-10-16-oracle-second-look.md`): §2 ten-increment plan (T1–T10) against
+  the kit's floor of four, identity baseline before any permit harvest, appraisal-only pilot then `__ALL__`
+  re-run, explorer and agent split, incremental refresh named as a capability; §3 the runtime `.gitignore`
+  gap and the `property_improvement` provenance; §3, §5, contract: the API serves only the published permit
+  scope, unlinked and excluded permits are counts; §4 privacy classification and registry candidates
+  conditional on a published group; §5 owners as `company`/`person`, `unlinked_reason`, lifecycle mapping,
+  estimator run twice, evidence-state counts, `status_source`, and the **open decision** on non-lexicon
+  permit fields for `mew`; §7 `cars[].kind` and the manifest as a packet descriptor.
