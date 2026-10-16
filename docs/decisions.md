@@ -578,3 +578,6 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
 - Portal re-probes under US egress: Cedar Park and Leander block pages persist (not geo-blocks); Sunset Valley's
   GovBuilt now answers a challenge (not attempted); Lakeway runs Tyler EnerGov self-service (reachable; a
   `tyler-civic-access` candidate for T4); Round Rock's portal is an account login; all six stay `blocked`.
+- Submitted on 2026-10-16 as https://github.com/elephant-xyz/lexicon/pull/194 from the operator's fork, with the
+  operator's approval of its text. Fork pull requests wait for a maintainer to approve the CI run and the
+  Vercel preview; the composition test is expected to fail until the maintainers choose a route.
