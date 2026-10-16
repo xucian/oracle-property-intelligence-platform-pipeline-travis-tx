@@ -3,6 +3,8 @@
 One row per increment of `docs/decisions.md` section 2. Status is `pending`, `prepared`, `observed` or
 `verified`; `verified` only after the operator's run, the inspection and the acceptance comparison.
 Versions (decisions.md section 15): v1 = T1–T2 plus the pilot upload; v2 = T3–T7; v3 = T8–T10.
+Design: the four pre-implementation reviews are done and `docs/api-contract.md` v1 is frozen (commit `de08901`,
+decisions.md section 21); T7's first commit is the Zod contract package and the committed `openapi.json`.
 Stop-per-increment is in force again (decisions.md section 17): T1 is handed to the operator; the
 work listed under T2 is **preparation, not T2**, allowed while the readiness validator is BLOCKED.
 
