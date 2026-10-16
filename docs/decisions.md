@@ -446,6 +446,10 @@ Applied in place before implementation; the review and every citation are in
   agent to "proceed autonomously" to deliver v1. Per `guide-product-work` this overrides the stop-per-increment
   rule for the v1 preparation steps; the omitted evidence (the operator's own run and observation of T1 and
   T2) is collected afterwards and recorded in `docs/progress.md` before T3 starts.
+  **Restored the same evening:** the operator restored the stop-per-increment rule. The autonomous run is
+  limited to T1 plus the safe preparation the readiness skill allows while blocked (adapter scaffold, fixtures,
+  profile fixtures, seed script not run). From the T1 hand-off onward the operator runs and inspects each
+  increment before the next starts, and the omitted-evidence clause above no longer applies.
 - **Egress today.** The operator's egress is outside the US (`ipinfo.io/country` returned `RO`). TCAD, the
   TNR parcel layer and data.texas.gov are unreachable until a US VPN window; the Austin Socrata feed, the
   lexicon manifest, GitHub, Filebase and the public gateways are reachable. Until the window: safe preparation
