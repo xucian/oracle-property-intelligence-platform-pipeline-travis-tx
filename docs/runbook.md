@@ -20,61 +20,65 @@ The Broward `coconut-creek` fixture test is timezone-sensitive at `99c7bff` (it 
 day off outside US timezones); `TZ=America/Chicago` makes the whole suite green and does not touch
 any Travis code (every Travis date is computed in UTC).
 
-## 1. T1 readiness (operator runs this first)
+## 1. T1 readiness
+
+The US egress window ran on 2026-10-16 (agent): the counts are in the catalog, the identifier is proven,
+and the validator is BLOCKED on one thing only, the parcel gate's material GIS gap (12.51%, condo accounts
+without their own polygons). Kit evidence: `skills/use-oracle/runtime/docs/travis-county-findings.md`
+section 0 and `skills/use-oracle/runtime/docs/evidence/`.
+
+### Observe the current state
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis
 python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml
 ```
 
-Today it prints `"overall": "BLOCKED"` with one blocker, the parcel gate ("canonical assessed-property
-count is missing"); permit `PASS` (23/23), destination `NOT_APPLICABLE`, enrichment `PASS`
-(`skills/use-oracle/runtime/docs/travis-readiness-2026-10-16.json`). The counts come from the US egress
-window below.
+Prints `"overall": "BLOCKED"`; parcel `BLOCKED` with "GIS 386682.0 vs assessed 441961.0 is approximately
+12.5% (threshold 2.0%); unresolved material discrepancy; GIS-only seeding is not allowed"; permit `PASS`
+(23/23), destination `NOT_APPLICABLE`, enrichment `PASS` (kit `docs/travis-readiness-2026-10-16-us-egress.json`).
 
-### US egress window (TCAD and TNR counts, then the seed)
+### Decide the parcel exception (operator decision), then observe PASS
 
-Every command checks egress first; stop if it is not `US`.
+The kit requires the cause, canonical denominator, seed decision, excluded population and coverage effect
+of a gap above 2% to be documented **and approved**. They are documented in `travis-sources.yaml` under
+`approved_exceptions` as `gate: parcel-pending-operator-approval` (the validator ignores that gate name).
+Read it first. Running the next command **is** the approval: it renames the gate to `parcel`, marks it
+approved, and re-runs the validator.
 
 ```bash
-curl -s ipinfo.io/country          # must print US; otherwise do nothing below
+cd /Users/luti/dev/ateam/role1-prism/kit-travis && sed -i '' -e 's/^  - gate: parcel-pending-operator-approval$/  - gate: parcel/' -e 's/^    status: proposed-awaiting-operator-approval$/    status: approved-by-operator/' skills/use-oracle/runtime/docs/travis-sources.yaml && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml
+```
+
+Expect `"overall": "PASS"`, `"seed_allowed": true`, `"execution_allowed": true`, parcel `PASS`
+(a dry run on a temporary copy returned exactly that). Commit the catalog change on the kit branch.
+
+### Seed (only after PASS, under US egress; county-seed-data)
+
+The TCAD files are already downloaded (free, sha256 receipts in kit `docs/evidence/travis-tcad-downloads-2026-10-16.jsonl`)
+into the gitignored `skills/use-oracle/runtime/data/travis/export/`. The export is the PACS Legacy 8.0.33
+fixed-width format; the script streams it from the archive and pages the TNR **MapServer** layer (the
+FeatureServer path is not enabled) at 1,000 features per request, about 387 requests.
+
+```bash
+curl -s ipinfo.io/country          # must print US
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-mkdir -p data/travis/export data/travis/tnr data/seeds
-
-# 1. Confirm the three geo-restricted hosts answer, and note whether the TCAD files are paid.
-curl -sI https://traviscad.org/publicinformation | head -1
-curl -s 'https://gis.traviscountytx.gov/server1/rest/services/Boundaries_and_Jurisdictions/TCAD_public/FeatureServer/0/query?where=1%3D1&returnCountOnly=true&f=json'
-curl -s 'https://data.texas.gov/resource/9cir-efmm.json?$select=count(*)'
-
-# 2. Download the 2026 Certified Appraisal Export and the Export Layout from the public information
-#    page (record the exact file URL you clicked; it becomes the bulk GET on every entity) and the
-#    Improvement Details export; unzip into data/travis/export. A paid file is a payment decision:
-#    record it in the run record; if declined, activate the GIS-only contingency in travis-sources.yaml.
-#    (If the host still answers 403 under US egress, it is a paywall, not a geo-block.)
-
-# 3. Page the TNR parcel layer and build the seed and the 25-row pilot (the script fails loudly on a
-#    column it cannot resolve against the layout; nothing is guessed). Use the recorded export URL.
 node src/counties/travis/build-seed.mjs \
-  --export-dir data/travis/export \
-  --export-url '<the exact TCAD export file URL downloaded in step 2>' \
-  --export-archive '<path to the downloaded export archive>' \
-  --layout '<path to the Export Layout file>' \
+  --export-archive 'data/travis/export/2026 Certified Appraisal Export Supp 0_07182026.zip' \
+  --export-url 'https://traviscad.org/wp-content/largefiles/2026%20Certified%20Appraisal%20Export%20Supp%200_07182026.zip' \
   --tnr-cache data/travis/tnr --fetch-tnr \
   --output data/seeds/travis.csv \
   --pilot-output data/seeds/travis-pilot.csv --pilot-size 25
-# prints travis_seed_complete with counts.assessedParcelCount, counts.gisFeatureCount,
-# tcadIdNormalizationProof and the pilot PROP_IDs; data/seeds/travis-seed-manifest.json keeps it.
-
-# 4. Put the two counts into the catalog and re-run the validator (expect PASS, seed_allowed true):
-#    parcel.assessed_parcel_count = counts.assessedParcelCount
-#    parcel.gis_feature_count     = counts.gisFeatureCount   (plus discrepancy_explanation if they differ > 2%)
-#    parcel.identifier_proven     = true  (after spot-checking 5 PROP_IDs on the TCAD property search)
-cd /Users/luti/dev/ateam/role1-prism/kit-travis
-python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml
+# prints travis_seed_complete: counts.rowsWritten (expected 441,961), gisFeatureCount, rowsWithGeometry,
+# foldedOwnerRecords, confidentialOwners, tcadIdNormalizationProof.oneToOne and the 25 pilot PROP_IDs;
+# data/seeds/travis-seed-manifest.json keeps the same. Re-run the validator right after.
 ```
 
-Reply with: the validator's `overall` after step 4, the two counts, whether the export was paid or
-free, and the first line of the layout's column list for the property file.
+Free files on the TCAD page, for the record: certified export
+`https://traviscad.org/wp-content/largefiles/2026%20Certified%20Appraisal%20Export%20Supp%200_07182026.zip`,
+layout `https://traviscad.org/wp-content/largefiles/Website_Legacy8.0.33-AppraisalExportLayout_06182026.zip`,
+improvement report `https://traviscad.org/wp-content/largefiles/improvement_detail_2026.zip`, certified
+totals `https://traviscad.org/wp-content/uploads/totals_2026_AsOfRollCorr_0_RunID_6885_20260718_171007.pdf`.
 
 ## 2. Preparation that is already done (not T2)
 
@@ -96,7 +100,7 @@ exactly that error (proved on the fixture, kit `docs/evidence/travis-fixture-val
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-curl -s ipinfo.io/country   # US required: --live-fetch queries the TNR layer per parcel
+curl -s ipinfo.io/country   # US required: --live-fetch queries the TNR MapServer layer per parcel
 head -2 data/seeds/travis-pilot.csv > data/seeds/travis-smoke.csv
 
 # one-parcel smoke, then the 25-parcel appraisal-only pilot (no permit harvest; eligibility __NONE__)

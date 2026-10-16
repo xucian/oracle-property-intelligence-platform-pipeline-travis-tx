@@ -559,3 +559,22 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
   increment's code and fixtures continue meanwhile, and validation is re-run when the published manifest
   includes Travis.
 
+
+## 19. 2026-10-16 (night): T1 under US egress — counts, the GIS gap, and the source corrections
+
+- **TCAD exports are free** direct downloads (no login, account or fee), so the section 13 paywall contingency
+  stays inactive. The 2026 certified export is the PACS Legacy 8.0.33 fixed-width format (`PROP.TXT`, 9,922-byte
+  records); `prop_id` is an `int(12)` field printed zero-padded, and the identifier is the integer that TCAD's
+  property search and the TNR layer print (section 5's "PROP_ID as printed" reads as that integer).
+- **Canonical parcel denominator:** 441,961 real-property accounts (distinct `prop_id`, `prop_type_cd` R). Mobile-home
+  (11,744), business personal property (39,536) and mineral (5) accounts are outside the parcel population.
+- **Coordinates source corrected:** the TNR layer is `TCAD_public/MapServer/0` (386,682 polygons, 13,130 without a
+  PROP_ID); the `FeatureServer/0` path in section 4 is not enabled on the service.
+- **The GIS gap is material (12.51%)**, explained by 57,567 condominium accounts without polygons of their own. The
+  kit's readiness gate requires the exception to be documented and approved; it is documented in the kit catalog as
+  proposed, and approving it is the operator's decision (runbook section 1). Until then the validator stays BLOCKED
+  and no seed is built. Accounts without a polygon stay seed rows without coordinates, reported as a coverage number.
+- Comptroller Active Franchise Taxpayers: 342,338 Travis rows (county code 227, the taxpayer's mailing county).
+- Portal re-probes under US egress: Cedar Park and Leander block pages persist (not geo-blocks); Sunset Valley's
+  GovBuilt now answers a challenge (not attempted); Lakeway runs Tyler EnerGov self-service (reachable; a
+  `tyler-civic-access` candidate for T4); Round Rock's portal is an account login; all six stay `blocked`.
