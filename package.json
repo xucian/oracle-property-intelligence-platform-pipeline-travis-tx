@@ -1,0 +1,16 @@
+{
+  "name": "oracle-property-intelligence-platform-pipeline-travis-tx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Travis County, TX Oracle pipeline: Travis county modules mirrored from the kit branch, run records, publication manifests and the hosted query layer.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "elephant-cli": "elephant-cli"
+  },
+  "devDependencies": {
+    "@elephant-xyz/cli": "github:elephant-xyz/elephant-cli#main"
+  }
+}
