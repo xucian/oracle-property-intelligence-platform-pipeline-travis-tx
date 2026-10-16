@@ -82,7 +82,8 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
 
 ## 3. Ingestion runtime
 
-- The kit's Oracle runtime (`skills/use-oracle/runtime`, Restate + Postgres, local via Colima) runs **on demand
+- The kit's Oracle runtime (`skills/use-oracle/runtime`; section 15 corrects this bullet: at `99c7bff` the shipped
+  runtime is the `elephant-county` CLI, and Restate + Postgres via Colima is a v2 decision) runs **on demand
   for the ingest job only** and is shut down once the run has reached a terminal state under the Restate
   coordinator. Oracle carries no standing infrastructure.
 - Travis County is a **new county adapter** in that runtime (`adapter`, `seed`, `permit-profile`,
@@ -417,3 +418,41 @@ Applied in place before implementation; the review and every citation are in
   estimator run twice, evidence-state counts, `status_source`, and the decision on non-lexicon permit
   fields (option ii, else iii, decided by the operator the same day; `mew` verifies whether `source_payload`
   survives hashing); §7 `cars[].kind` and the manifest as a packet descriptor.
+
+## 15. 2026-10-16 (evening): v1 cut and runtime correction before implementation
+
+- **Runtime premise corrected.** At `99c7bff` the kit's bundled runtime is the `elephant-county` CLI
+  (`skills/use-oracle/runtime/bin/elephant-county.mjs`: `capture-raw`, `ingest`, `reconcile-export`, `replay`)
+  over per-county modules `src/counties/<county>/{adapter,seed,query-table,validate,permit-profile,enrichment-profile}.mjs`
+  (Duval, Broward and Pinellas ship), plus the AWS Batch track for enrichment. It ships no Restate services, no
+  Postgres, no `docker-compose.yml` and no `Parcel.process`; the Restate topology that `county-ingest-run`,
+  `county-appraisal-onboarding` and `bootstrap-oracle-infra` describe is one the operator would author with
+  `durable-workflow-builder`. Section 3's "Restate + Postgres via Colima" and its `Parcel.process` smoke are
+  therefore replaced for v1: Travis is a `src/counties/travis/` module registered in the CLI's adapter map, the
+  single-parcel smoke is `elephant-county ingest --live-fetch` on a one-row seed, the pilot is the same command
+  on the 25-row seed, and the internal load is `reconcile-export`. The durable Restate topology is a v2
+  decision, taken only if the full run's volume needs it. "On demand, no standing infrastructure" still holds:
+  the CLI runs and exits.
+- **Versions.** The kit has no v1/v2/v3 staging; this is the repo's cut over section 2's increments, chosen so
+  v1 is the lowest-hanging end-to-end slice. **v1** = T1 readiness PASS + T2 appraisal-only pilot (about 25
+  parcels) through the CLI runtime, the pilot `county` group taken through `validate → hash → validate CAR →
+  export-tables`, and, when Filebase keys are available, `upload` with readback, Pinata pin, two-gateway checks
+  and `publish/<run_id>/manifest.json`, labelled "pilot scope, uploaded with readback, no Atlas PR". **v2** =
+  T3–T7: identity baseline, permit profile and feasibility, full run and reconciliation, run-1 publication with
+  the Atlas PR, hosted layer (the first point at which `slowking` can score). **v3** = T8–T10: explorer, agent,
+  incremental refresh with run 2 at least 24 hours after run 1, plus BBB from the AWS runtime, the
+  `corporate_registry` group if approved, Atlas merge → IPNS → MCP sync.
+- **Autonomy, recorded as the operator's explicit instruction.** On 2026-10-16 the operator instructed the
+  agent to "proceed autonomously" to deliver v1. Per `guide-product-work` this overrides the stop-per-increment
+  rule for the v1 preparation steps; the omitted evidence (the operator's own run and observation of T1 and
+  T2) is collected afterwards and recorded in `docs/progress.md` before T3 starts.
+- **Egress today.** The operator's egress is outside the US (`ipinfo.io/country` returned `RO`). TCAD, the
+  TNR parcel layer and data.texas.gov are unreachable until a US VPN window; the Austin Socrata feed, the
+  lexicon manifest, GitHub, Filebase and the public gateways are reachable. Until the window: safe preparation
+  only (catalog, records requests, approved exceptions, permit-profile fixtures from Socrata samples, adapter
+  scaffold, the runtime `.gitignore` fix, the readiness validator's BLOCKED report); no seeding, no pilot, no
+  live fetch of geo-blocked hosts, no BBB from the laptop.
+- **Where the Travis module lives.** In a separate worktree of the kit at
+  `/Users/luti/dev/ateam/role1-prism/kit-travis` on branch `travis`, because the Claude Code plugin installs
+  from the main checkout, which stays at the pin on `main`. The mirror into this repository under
+  `oracle/travis/` is unchanged.

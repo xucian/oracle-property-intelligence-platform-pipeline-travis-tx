@@ -2,6 +2,7 @@
 
 One row per increment of `docs/decisions.md` section 2. Status is `pending`, `prepared`, `observed` or
 `verified`; `verified` only after the operator's run, the inspection and the acceptance comparison.
+Versions (decisions.md section 15): v1 = T1–T2 plus the pilot upload; v2 = T3–T7; v3 = T8–T10.
 
 | ID | Increment | Depends on | Status | Run / request id | Checkpoint | Expected vs actual | Operator observation | Next step |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
