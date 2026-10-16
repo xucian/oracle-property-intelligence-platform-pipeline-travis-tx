@@ -72,8 +72,8 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
      Lambda logs inspected.
   8. **T8 Explorer** (after T7): the static explorer with its Verify action and query panels. Check: the
      README demo transcript steps 1–7 on the live URL; CloudFront and S3 inspected.
-  9. **T9 Agent** (after T7): the Bedrock agent behind `/v1/agent/chat` with the `v1` tools. Check: the two
-     README agent prompts answered with cited ids and CIDs; Lambda and Bedrock usage inspected. Kept separate
+  9. **T9 Agent** (after T7): the Bedrock agent behind `/v1/agent/chat` with the `v1` tools. Check: the golden set of section 20,
+     replayed under SAM local and then on AWS, passes its hard gates; Lambda, Bedrock and LangSmith traces inspected. Kept separate
      from T8 because it is a different concept with a different inspection point.
   10. **T10 Incremental refresh** (`continuous-ingestion`; after T6, demonstrated after T7): the windowed
       delta capability: change detection per source watermark, tombstones, the stale-snapshot queue, new group
@@ -243,7 +243,8 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
   The file is stored in S3 beside the Parquet mirror, downloaded once per Lambda instance into ephemeral storage
   (sized to the file, 2 GB) and reused across warm invocations, so queries never range-read S3 per request. It
   is a deployment artifact, not a published one; the Parquet mirror is what the browser reads. No provisioned
-  concurrency: the first request after an idle period can take several seconds, and the README says so.
+  concurrency: the first request after an idle period can take several seconds, and `docs/runbook.md` and the PR body say so
+  (README.md is never edited; section 20).
 
 ## 6. Incremental runs
 
@@ -330,6 +331,7 @@ BBB is the exception: its probe and any harvest run from the approved AWS runtim
   full-text permit index, and generation that only reports rows those tools returned, with ids and sources.
   No embedding index is used: the README's example questions are numeric and spatial filters, which
   embeddings cannot evaluate, and the kit's RAG skill counts operational retrieval over records as RAG.
+  Section 20 corrects the classification and records the exceptions this paragraph left implicit.
 - **Kit-guideline exceptions, recorded.** The chat path calls Bedrock synchronously because the user waits
   for the answer; it has a 30-second timeout, two retries with backoff, bounded concurrency and metrics, which
   is the guideline's documented-sync case. Critical-failure alerting goes to a PagerDuty free-tier service
@@ -374,7 +376,7 @@ limitations, a cost table that separates standing cost (S3, CloudFront, CloudWat
 - **Bedrock enablement on the deployment account is pending with AWS** (requested 2026-10-16). Bedrock is
   first needed in the hosting increment. If enablement is still pending then, the agent runs on the Vercel AI
   SDK's Anthropic provider with an API key in Secrets Manager, recorded here as a dated deviation, and moves
-  to Bedrock when access arrives.
+  to Bedrock when access arrives. Section 20 adds what that deviation must keep and record.
 - **Parcel geometry unavailable under US egress** → coverage limited to permit-located parcels, reported as a
   number, never geocoded.
 - **TCAD export behind a paywall** → the purchase is a human payment decision, recorded in the run record. If
@@ -581,3 +583,101 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
 - Submitted on 2026-10-16 as https://github.com/elephant-xyz/lexicon/pull/194 from the operator's fork, with the
   operator's approval of its text. Fork pull requests wait for a maintainer to approve the CI run and the
   Vercel preview; the composition test is expected to fail until the maintainers choose a route.
+
+## 20. 2026-10-16 (night): corrections after the alakazam retrieval and agent review
+
+Applied before the contract freeze; the review and its citations are in
+[`reviews/2026-10-16-alakazam-retrieval-agent-review.md`](./reviews/2026-10-16-alakazam-retrieval-agent-review.md), and
+the contract changes are dated in `api-contract.md`'s change control.
+
+- **Classification.** The agent is knowledge Q&A: grounded generation over operational data, with a structured
+  leg (SQL filters) and a lexical leg (the DuckDB full-text index) and no vector leg. No retrieval result is
+  auto-applied, so the kit's confidence bands, review queue and staged automation do not apply; grounding,
+  citation and golden-set evaluation do. Recorded exceptions: no Bedrock embeddings, no OpenSearch, no Docker
+  OpenSearch. README requires DuckDB and no standing cost, and v1 has no vector retrieval. Local replay is
+  `sam local invoke` of the chat function from `cdk.out` against a DuckDB file built by the same deploy code from
+  fixture inputs. If embeddings are ever needed they go to OpenSearch, with its standing cost accepted by the
+  operator, never to DuckDB `vss`.
+- **Fields the lexicon cannot hold (option iii, made one observation).** The deploy takes them from the same run's
+  own captures: the Socrata export rows behind the published permits and the TCAD export rows behind `geo_id` and
+  `owner_name`, each verified by the SHA-256 the run record holds (`sources[].sha256`). The captures travel with the
+  deploy inputs in the private S3 deploy bucket and are never served as artifacts. Each published permit joins to
+  exactly one captured row on `permit_number`; duplicates, missing rows and rows whose link disagrees with the
+  published one are `conflicting` or `unavailable` and are neither served nor indexed. Every such field is labelled
+  `unpublished_source` and never attributed to `record_cid`; `/v1/meta.deploy` pins the snapshot. If a run's capture
+  is unavailable, one live read per deploy is pinned instead and recorded the same way.
+- **Text search.** Index configuration: porter stemmer, English stopwords, an ignore pattern that keeps digits,
+  lowercase and accent stripping, recorded in `/v1/meta.deploy.text_index`. A versioned alias list built from the
+  permit profile's vocabulary rewrites variants to one token in documents and queries (`re-roof`, `re roof`,
+  `reroof`). Stopwords are dropped from queries before matching: checked locally on DuckDB 1.5.6, where a
+  conjunctive query containing a stopword returns nothing and `re-roof`, `reroof` and `re roof` do not match one
+  another without the alias list. Matching defaults to all terms; sort is `bm25_score` then `permit_id`.
+- **Golden set; replaces T9's two-prompt check.** `fixtures/rag/queries/*.json`, replayed under SAM local and then
+  on AWS before T9 is accepted. Cases: both README prompts as one two-turn conversation; several cities, ZIPs and
+  alias spellings; out-of-county, off-topic and no-match questions; "many years"; BBB and owner-contact questions;
+  an area with `needs_review` permits; text-search vocabulary variants with hand-labelled permit ids; one injected
+  description. Each case records the expected tool sequence and parameters, the expected ids computed by SQL on the
+  same DuckDB file, and the expected `outcome`. Hard gates: no id or CID cited unless a tool returned it in that
+  turn; no `answered` without a successful tool call. Reported, labelled experimental: parameter accuracy, id recall
+  on the returned page, text-search precision and recall at k, outcome accuracy, p95 turn latency, tokens per turn.
+  Rerun on any change of model, provider, prompt or profile.
+- **Grounding.** The server builds `evidence[]` from the turn's tool results and checks every citation in the answer
+  against it, failing closed; earlier turns are never evidence; typed limitations are added by the server. The
+  system prompt requires `roof_age_basis` and `roof_age_confidence` with every roof age, "listed contractor as
+  printed, not a verified identity", and "stalled" as expired with no evidence of completion.
+- **Prompt-injection boundary.** Tools stay read-only: no write, URL-fetch or outbound tools, ever. Tool results reach
+  the model as JSON with free-text fields capped at 1,000 characters and stripped of control, zero-width and bidi
+  characters, under a system rule that tool text is data. Roles are limited to `user` and `assistant`. The explorer
+  renders the answer as sanitized Markdown: no HTML, no remote images, links only to the API, the explorer and the two
+  public gateways. The MCP instructions and the OpenAPI mark the untrusted fields. The golden set carries an injection
+  case.
+- **Personal data.** The agent's view of `get_property` and `get_permit` omits `owner_name`, `mailing_address`,
+  `applicant` and the contractor's phone unless the question asks about ownership or contact. Logs and traces carry
+  ids, counts and hashes only; LangSmith hides person fields. CloudWatch logs are kept 30 days; LangSmith retention
+  is the plan's and is recorded at T9. The section 13 fallback adds a processor outside AWS and is recorded as such.
+- **Stateless chat.** HTTP ingress with no Chat SDK state: the kit's `ConversationEventStore` interface with its
+  `NoopConversationEventStore`, so AgentCore Memory can be added later without a contract change. Tool results do
+  not carry between turns; follow-ups work through the history the client sends, and the golden set covers it.
+- **Time budget and isolation.** Chat runs in its own Lambda function, same package and DuckDB artifact, with its own
+  reserved concurrency and the only Bedrock grant, so chat load cannot starve the CRM's REST and MCP calls and the
+  public REST path cannot invoke Bedrock; metagross sizes it. Each turn has a deadline of about 25 s from receipt,
+  cold start included, under API Gateway's 30 s cutoff; each step's timeout derives from the remaining budget; at
+  most one retry, only on throttling or a 5xx, and only if budget remains; the output budget counts across steps; a
+  `stopWhen` cap of 6 steps. At the deadline the turn returns `limit_reached` with the evidence so far. A circuit
+  breaker returns `503 circuit_open`. A server-side daily request and token budget, whose alarm action disables chat,
+  returns `503 budget_exhausted`. This deviates from the guideline's default timeout of 5 s or less: the user waits
+  for a model answer.
+- **Agent tools.** `limit` 20 (max 50), always with `total`; the model sees a projection that keeps ids, CIDs,
+  signals and `source.url` and drops `source_http_request` and long text; one structured log line per tool call
+  (params, total, returned, ms, status). `search_properties.open_permits` is required for the agent and MCP. The
+  harness rejects any search whose `lat`/`lon` was neither returned by `resolve_search_center` in the turn nor typed
+  by the user; the agent asks when only non-exact search centers come back, and the centroid basis goes into
+  `assumptions`.
+- **Observability.** Proposed runtime name `staraptor-agent`, after a hawk that surveys rooftops from above, pending
+  the operator's confirmation as the kit's naming rule requires; it names `LANGSMITH_PROJECT`, the Powertools
+  service and the metrics namespace. LangSmith through the kit's facade: session = `session_id`, else `request_id`;
+  `flush()` before returning; degrade gracefully when tracing fails; key in Secrets Manager, whose monthly charge goes
+  in the standing-cost row of the cost table. Bedrock prompt caching through `withBedrockPromptCaching`, with the
+  per-deploy run summary in the system prompt and cache tokens logged. Per-turn metrics: steps, tool calls, input,
+  output and cache tokens, latency, outcome, deadline hits, citation-check failures, Bedrock throttles and denials;
+  an error-rate alarm on the recorded alerting channel. Every REST and MCP response carries `x-request-id`.
+- **Model.** At T9: one Converse call through the inference profile from the chat function's role, and the on-demand
+  quotas checked, since a listed profile is not proof of permission. The default model is chosen on the golden
+  set's accuracy and p95 latency within the deadline, Sonnet or Opus through the one stack parameter, with the
+  per-request cost in the cost table. The section 13 fallback, if used: tool results go to a processor outside AWS,
+  the provider's own cache control replaces the Bedrock-only middleware, the time-budget controls stay, responses
+  and traces report provider and model, and switching back reruns the golden set.
+- **`needs_review` correction loop.** The operator reviews the distinct unmapped terms; accepted terms become profile
+  fixtures under a new `work_classifier_version` with reviewer, date and reason; nothing is accepted from model
+  output.
+- **Durations.** `open_duration_days`, `days_since_expiry` and the long-open test are computed at query time and
+  quoted with `open_duration_as_of`.
+- **README vs kit, satisfied both ways.** DuckDB with no standing cost versus the kit's OpenSearch: no vector leg in
+  v1, exception recorded above. HTTP chat and MCP versus the kit's Asana ingress: this product has no Asana thread;
+  the rest of the kit's agent stack applies. CIDs as identity versus fields the lexicon cannot hold:
+  `unpublished_source` per record and `deploy.reads` per snapshot. No standing cost versus Secrets Manager: its
+  monthly charge is listed in the cost table.
+- **Effect on the plan.** T7 gains the chat function split, the citation check and MCP schemas generated from the tool
+  registry, about 1 to 2 hours; T9 gains the golden set, tracing, caching and the budget controls, about 2 to 3
+  hours. The CRM syncs these contract changes with the rest at the freeze.
+
