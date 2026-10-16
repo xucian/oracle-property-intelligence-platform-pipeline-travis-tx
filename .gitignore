@@ -7,3 +7,4 @@ oracle/travis/runs/
 *.car
 *.parquet
 data/
+*.log

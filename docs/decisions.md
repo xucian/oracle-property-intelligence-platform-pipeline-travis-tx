@@ -513,3 +513,31 @@ errors today, so the live manifest confirms each point at T2's first `elephant-c
   `FILEBASE_BUCKET`, so the runbook maps the token variable onto the key variable and the bucket name is added
   before the first upload. The v1 pilot upload is therefore possible as soon as the US egress window has
   produced the pilot.
+
+## 17. 2026-10-16 (night): T1 preparation results and two recorded changes
+
+- **Stop-per-increment restored.** The operator restored `guide-product-work`'s stop-per-increment
+  rule after the v1 preparation. This run ends with T1 handed to the operator (`docs/progress.md`:
+  T1 `prepared`, T2 `pending`); everything beyond T1 that was built is the safe preparation
+  `county-readiness-preflight` allows while the validator is BLOCKED (adapter scaffold, transform,
+  fixtures, permit-profile fixtures, seed script not run) and is labelled "preparation, not T2".
+  No seed, smoke, pilot or `ingest --live-fetch` has run.
+- **Section 5, non-lexicon permit fields: option (ii) is dead at `validate`.** Every live class
+  schema is `additionalProperties: false` without `source_payload`, and `elephant-cli validate`
+  1.58.1 (commit `44bb182`) rejects `source_payload` on a `property` entity (kit evidence
+  `docs/evidence/travis-fixture-validate-2026-10-16.*`). The transform keeps lexicon-gap fields in a
+  per-parcel sidecar outside the archive; the hosted layer takes option (iii) (re-read the public
+  exports for the non-lexicon columns, keyed by `permit_number` and `PROP_ID`, with their own
+  provenance). Section 16's `geo_id` note follows: the deploy re-reads the TCAD export for it.
+- **Lexicon county enum (new blocker for T2).** `unnormalized_address.county_jurisdiction` (required)
+  and `address.county_name` are enumerated and lack `Travis`; every Travis property fails
+  `validate` on exactly that error until the enum is extended. The request is drafted in the kit
+  (`docs/travis-lexicon-county-enum-request.md`); opening the pull request on
+  `elephant-xyz/lexicon` is an operator action and precedes any hash or upload.
+- **Austin permits carry no license number** (78 export columns, none license-related) and Texas
+  issues no roofing license, so the DBPR-style official lookup has no key in v1/v2; contractor
+  fields stay source-name attribution, as section 4 already states. `:updated_at` is the daily
+  publish time on every Socrata row, so incremental runs watermark on row content and the
+  `statusdate`/`applieddate` windows, not on `:updated_at` (section 6 reads that way).
+- **Elephant CLI** is installed project-locally in this repository (`package.json` devDependency,
+  `github:elephant-xyz/elephant-cli#main` resolved to 1.58.1 / `44bb182b9f7f904662e9b33e1fde70bdeab62322`).
