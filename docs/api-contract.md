@@ -13,8 +13,8 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 ## Transport
 
 - HTTPS, JSON, UTF-8. No authentication. CORS `*`.
-- Base URL: recorded in `README.md` after deploy as `API_BASE`. OpenAPI 3.1 served at `GET /v1/openapi.json`
-  and kept identical to this file.
+- Base URL: recorded in `docs/runbook.md` and the PR body after deploy as `API_BASE` (README.md is the
+  assignment text and is never edited). OpenAPI 3.1 served at `GET /v1/openapi.json` and kept identical to this file.
 - MCP (Streamable HTTP, stateless JSON responses, no SSE) at `POST /mcp`, exposing the same operations as
   tools (see "MCP tools").
 - Throttling is per API stage, shared by all clients: 20 requests/s steady, burst 40. Route throttles:
@@ -24,6 +24,9 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
   absent, so clients back off on the status code alone (1 s, then 2 s, then 4 s). Tool calls the pipeline's own
   agent makes inside its Lambda do not pass through the HTTP API; the CRM's agent calls over HTTP and must
   back off on `429` like any client.
+- The MCP endpoint is a single route, so the Lambda enforces the same per-operation limits inside the MCP
+  handler: `search_permit_text` 5 requests/s, burst 10; the other tools at the stage rate. Over limit the tool
+  returns a JSON-RPC error carrying `retry_after_seconds`, and the client backs off as for `429`.
 - Errors: `400 {error, detail}` for invalid params, `404 {error}` for unknown ids, `429`, `5xx {error, request_id}`.
 - Path ids are URL-encoded; `permit_id` contains a space (`2026-102216%20EP`).
 
@@ -32,7 +35,7 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 | Term | Definition |
 | --- | --- |
 | `property_id` | TCAD **Property ID** (`PROP_ID`) exactly as the roll prints it: a string, never normalized, leading zeros preserved (the roll and the GIS layer print an integer, so none are expected). It is the lexicon `parcel_identifier` and the kit's `request_identifier` for the parcel. |
-| `geo_id` | TCAD **Geographic ID** (`geo_id`, string, e.g. `0222210299`), kept exactly as printed. Austin permits carry it as `tcad_id`; **permits link to properties on `geo_id`**, never on `property_id`. The link compares the printed values exactly first. Comparing with every non-digit character removed is a fallback that is enabled only after the Travis permit profile has proven that normalization one-to-one over the roll (no two `geo_id` values collapse) and recorded its version. Every link states how it was made (`property_link`); a permit with zero or several candidate parcels stays valid-unlinked with `property_id` null. |
+| `geo_id` | TCAD **Geographic ID** (`geo_id`, string, e.g. `0222210299`), kept exactly as printed. Austin permits carry it as `tcad_id`; **permits link to properties on `geo_id`**, never on `property_id`. The link compares the printed values exactly first. Comparing with every non-digit character removed is a fallback that is enabled only after the Travis permit profile has proven that normalization one-to-one over the roll (no two `geo_id` values collapse) and recorded its version. Every served permit states how its link was made (`property_link`). A permit with zero or several candidate parcels stays valid-unlinked in the Query DB, is never published or served, and is counted under `/v1/meta.unlinked_reasons`. |
 | `permit_id` | Austin permit number as printed (the lexicon `permit_number`), e.g. `2026-102216 EP`. |
 | `contractor_attribution_key` | Pipeline-assigned grouping key: hash of the printed company name and phone. It groups permits that print the same values; it is **not** an identity, and phone never feeds identity. Every contractor object carries `identity_status: "source_name_attribution"`; `official_identity` is null until an official registry or licensing record matches, which v1 does not attempt. |
 | `run_id` | Pipeline run id, `YYYYMMDDTHHMMSSZ`. |
@@ -213,7 +216,7 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 
 | Field | Type |
 | --- | --- |
-| `owner_name` | string or null |
+| `owner_name` | string or null; as printed, from the property's `source_payload` (option ii) or the TCAD export (iii), since the published `person` record is case-normalized and split |
 | `mailing_address` | `{line1, line2, city, state, zip}` or null |
 | `deed_date` | date or null |
 | `owner_tenure_years` | number or null |
@@ -225,10 +228,9 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | Field | Type | Notes |
 | --- | --- | --- |
 | `permit_id` | string | as printed (`permit_number`) |
-| `geo_id` | string or null | `tcad_id` as printed |
-| `property_id` | string or null | resolved through `geo_id`; null when zero or several parcels match |
-| `property_link` | `{match_method: "exact"|"normalized_digits", normalization_version, confidence}` or null | how the link was made; null when unlinked |
-| `unlinked_reason` | `no_candidate`, `multiple_candidates`, `invalid_quarantined` or null | set only when `property_id` is null |
+| `geo_id` | string or null | `tcad_id` as printed, from the record's `source_payload` (option ii) or the Socrata export (option iii); it has no lexicon home |
+| `property_id` | string | always present: a published permit sits under its property root in the archive |
+| `property_link` | `{match_method: "exact"|"normalized_digits", normalization_version, confidence}` | how the link was made at transform time; unlinked permits are never served, only counted |
 | `permit_type`, `permit_class`, `work_class`, `description` | string | as printed |
 | `roof_work_class`, `work_classifier_version` | see definitions | |
 | `is_roofing`, `is_reroof` | bool | derived from `roof_work_class` |
@@ -241,7 +243,7 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
 | `contractor` | `{contractor_attribution_key, identity_status: "source_name_attribution", printed_name, company_name, trade, phone}` | `printed_name` = `contractor_full_name` as printed, never blanked |
 | `bbb` | `{rating, status, incomplete_reason, note}` | |
 | `lat`, `lon` | number or null | permit coordinates |
-| `source` | `{dataset: "austin-issued-construction-permits/3syk-w9eu", record_id, url, fetched_at, run_id, request_identifier, source_http_request}` | `url` = the permit's public page |
+| `source` | `{dataset: "austin-issued-construction-permits/3syk-w9eu", record_id, url, fetched_at, run_id, request_identifier, source_http_request}` | `url` = the permit's public page; `source_http_request` comes from the archive block (option ii) or the run record, since the exported tables omit it |
 | `record_cid`, `property_cid`, `data_group_cid` | string | always present: the API serves only permits in the published `property_improvement` group |
 | `match_snippet`, `score` | | text-search results only |
 
@@ -305,5 +307,9 @@ Server `instructions` describe the county, the run, the counts, the group CIDs a
   lifecycle mapping stated; `Cancelled*` enumerated in fixtures; `record_cid` always present (no
   query-tables-only rows); `registry_candidates` conditional on a published group; `evidence_states` and
   `unlinked_reasons` on `/v1/meta` and Run.
+- 2026-10-16, after the `mew` lookup and the CRM agents' review: `API_BASE` lives in `docs/runbook.md`, not README.md;
+  MCP tools enforce the REST per-operation throttles; `property_id` and `property_link` are always present on
+  served permits and `unlinked_reason` is counts-only on `/v1/meta`; `geo_id`, `owner_name` and per-record
+  `source_http_request` are sourced from the archive block (option ii) or the public export (iii).
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.

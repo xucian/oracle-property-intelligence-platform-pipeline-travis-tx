@@ -456,3 +456,56 @@ Applied in place before implementation; the review and every citation are in
   `/Users/luti/dev/ateam/role1-prism/kit-travis` on branch `travis`, because the Claude Code plugin installs
   from the main checkout, which stays at the pin on `main`. The mirror into this repository under
   `oracle/travis/` is unchanged.
+
+## 16. 2026-10-16 (evening): lexicon corrections from the `mew` lookup, and two CRM-side contract fixes
+
+Source: the `mew` agent's read-only lookup against the kit's bundled catalog. The live lexicon MCP tools returned
+errors today, so the live manifest confirms each point at T2's first `elephant-cli validate`.
+
+- **Envelope, not lexicon properties.** `source_http_request` and `request_identifier` are the kit's per-entity
+  envelope required by `elephant-cli validate` (output-contract.md:31-32), not properties of any class;
+  relationships carry only `from` and `to`. Section 5's "the lexicon `source_http_request`" is read that way.
+  The kit defines `request_identifier` as the parcel identifier substituted into the request; keeping `PROP_ID`
+  on `property_improvement` entities whose request is the bulk Socrata GET is a deliberate deviation so that
+  the tables column stays the parcel id. Recorded here as such.
+- **The Seed group is mandatory.** The transform also emits `property_seed` (`parcel_id`, `prior_parcel_id`)
+  and `unnormalized_address` (with `county_jurisdiction`), linked by the seed relationships; `hash` refuses to
+  run without the seed root. Section 5's class list is read as including them.
+- **Owners are never "as printed".** `person.first_name` and `last_name` are required and pattern-constrained
+  (capitalized), so a roll owner string is case-normalized and split into a `person`, or becomes a `company`
+  by a recorded classification rule; the as-printed string and the (`PROP_ID`, printed name) owner key stay in
+  `source_payload`. `company.name` has no pattern.
+- **Cardinality.** `parcel_has_property_improvement` is single-valued per root; `property_has_property_improvement`
+  (one-to-many) is the carrying link for a property's many permits. The transform emits one
+  `property_has_property_improvement` per permit and at most one `parcel_has_property_improvement`.
+- **`property_id` comes from the archive.** A published `property_improvement` always sits under its property
+  root, so a served permit always has `property_id` and `property_link` (the method recorded at transform time);
+  `unlinked_reason` exists only as counts on `/v1/meta`. The `geo_id` link is made in the transform and the
+  Query DB, never re-made by the hosted layer. `geo_id` has no lexicon home: the transform keeps it in
+  `source_payload` on the property and on the permit, so option (ii) covers it; under (iii) the deploy also
+  re-reads the TCAD export for it.
+- **Identity of published records.** `permit_number` is optional and unpatterned in the lexicon; uniqueness per
+  permit is a transform and Query DB invariant, and the published identity is the record CID.
+- **Option (i) is dead on the lexicon's own terms.** `improvement_status` has no `Expired` member, so `stalled`
+  would be unrecoverable, and `improvement_type: Roofing` or `improvement_action: Replacement` taken from
+  description text would publish the classifier's output. The recorded choice, (ii) else (iii), stands. The
+  empirical check for (ii) is fixed: hash one pilot property whose `property_improvement.json` carries
+  `source_payload`, inspect the canonical block for the key, change one `source_payload` value and confirm the
+  record CID changes, and confirm `export-tables` writes no such column.
+- **Contractor contact fields.** The group has homes (`company.name`, `communication.phone_number` through
+  `company_has_communication`, `person` through `contractor_has_person`); v1 writes none because there is no
+  official identity. The gap ledger records this as a policy consequence, not a lexicon gap. `trade`, applicant
+  and job valuation have no home.
+- **Groups to confirm live.** The bundled catalog has no `corporate_registry` or `places` group, and `company`
+  has no taxpayer-number property (only `sunbiz_document_number`); the Comptroller rows therefore stay Query DB
+  candidates unless the live manifest provides a home.
+- **CRM-side contract fixes** (reported through the roofing-crm agents): `API_BASE` is recorded in
+  `docs/runbook.md` and the PR body after deploy, never in README.md; and the MCP endpoint enforces the same
+  per-operation limits as the REST routes inside its handler, so `search_permit_text` cannot bypass the
+  text-search throttle.
+- **Publication credentials.** Filebase and Pinata credentials exist in the operator's git-ignored `.env`
+  (variable names only: `FILEBASE_ACCESS_TOKEN`, `FILEBASE_SECRET_KEY`, `PINATA_API_KEY`, `PINATA_API_SECRET`,
+  `PINATA_JWT_SECRET_ACCESS_TOKEN`). The kit's CLI reads `FILEBASE_ACCESS_KEY`, `FILEBASE_SECRET_KEY` and
+  `FILEBASE_BUCKET`, so the runbook maps the token variable onto the key variable and the bucket name is added
+  before the first upload. The v1 pilot upload is therefore possible as soon as the US egress window has
+  produced the pilot.
