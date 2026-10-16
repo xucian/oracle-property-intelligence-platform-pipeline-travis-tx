@@ -8,3 +8,4 @@ oracle/travis/runs/
 *.parquet
 data/
 *.log
+*.DS_Store
