@@ -929,13 +929,41 @@ versioned rule, so a later change is a re-load, not a rewrite of history.
    them to a Travis taxpayer, and the veteran file's own `taxid` equals the joined taxpayer number on 24,868 (16 differ,
    582 blank). **Ruled (operator, 2026-10-17): approved.** The SOS file number left-padded to 10 digits counts as the
    exact SOS file number (`travis-sos-file-number-join.v1`).
-2. **Withheld numbers inside two digests.** `api-contract.md` defines `business_record_id` as the SHA-256 of the source
+2. **Withheld numbers inside two digests.** `api-contract.md` defined `business_record_id` as the SHA-256 of the source
    key and the printed key, and `unpublished_source.row_sha256` as the hash of the row as captured. For a sole owner's
-   sales-tax row (`record_id_withheld: individual_owner`; 9,471 Travis outlets) either digest can be reversed by trying
-   every 11-digit number, which contradicts "they never expose a withheld number". The private snapshot already keys
-   such a row by the hash of the row with the withheld cell emptied and stores only that hash. Open: a dated contract
-   correction (allowed until T7's first deploy, as in the change-control entries of 2026-10-17) that makes both digests
-   use the redacted row for withheld rows, or another rule.
+   sales-tax row (`record_id_withheld: individual_owner`; 9,471 Travis outlets of 9,088 owners) either digest could be
+   reversed by trying every 11-digit number, which contradicts "they never expose a withheld number".
+   **Ruled (oracle agent, delegated by the operator on 2026-10-17):**
+   - `unpublished_source.row_sha256` of a withheld row is the SHA-256 of the captured row with the withheld cells
+     emptied. It is a content digest: anyone holding the capture recomputes it, the page digest in `sources[].sha256`
+     still anchors the page, and it holds no trace of the number.
+   - `business_record_id` of a withheld row is the first 32 hex characters of HMAC-SHA256 under a record-id key over
+     the same message as the plain recipe (source key, taxpayer number, outlet number; `travis-record-id.v1`). Records
+     with a printed key keep the plain SHA-256.
+   - Collision counts on the 9,471 real rows: the plain recipe with the number emptied (source key and outlet number)
+     gives 22 ids, collapsing 9,464 rows (outlet number 1 alone covers 5,615); taxpayer name plus outlet number shares 4
+     ids among 8 rows; the redacted row and the outlet fields (number, name, address, city, ZIP, permit and first-sale
+     dates) give 9,471 distinct ids today, but nothing guarantees it, and either id changes whenever any of those printed
+     values changes; the keyed digest gives 9,471 distinct ids by construction, because its message is the dataset's own
+     unique key ("combined with taxpayer number, a unique number to identify the outlet", the dataset's column notes).
+     Omitting the digests is ruled out: `business_record_id` is the path key of `/v1/businesses/{id}` and of
+     `RegistryCandidate`, and `row_sha256` is the row's provenance.
+   - Why: (a) no kit agent or skill owns identifier design for privacy-classed rows; the kit's only precedent stores an
+     SSN "as an immutable salted hash" (use-neutral-lexicon model-b, precedent, not authority), and with an 11-digit
+     input only a secret key, not a public salt, stops enumeration, so the keyed digest is that precedent's reading;
+     (b) the READMEs ask for no collapsed entities and for preserved provenance and say nothing about record ids; (c) the
+     operator's lean, digests without the number, fits `row_sha256` exactly and is adopted there, but as an id it either
+     collapses rows or is unstable, so the id keeps the number inside a keyed digest.
+   - The key: 32 random bytes in `data/travis/keys/record-id.key` under the kit runtime (gitignored, mode 0600,
+     `TRAVIS_RECORD_ID_KEY_FILE` overrides), created once with `node src/counties/travis/t3-record-id-key.mjs init`,
+     never printed. The kit loader and `packages/deploy-build` both run on the operator's machine (section 21) and read
+     the same file; the watermark and the run record carry its fingerprint (`a85dc5bf94154a97`), and a load with a
+     missing or different key stops. The operator keeps one copy off the machine: with the key lost, the next load
+     re-keys the sole-owner outlets once (`--allow-rekey`, recorded as `rekeyed`), and nothing else changes.
+   - Applied 2026-10-17: the snapshot keys withheld rows by that id (the one-time change: 9,471 rows re-keyed, none
+     removed); a re-load is a no-op; the privacy check finds no number, no captured-row hash, no plain-recipe id and no
+     key material in any derived file, and 9,471 distinct keyed ids; no record id is shared by two records in any
+     snapshot. `api-contract.md` change control, 2026-10-17.
 3. **`license_record_id` for TDLR.** The recipe "license number and type" is not unique in the TDLR files: 121 A/C
    technician numbers are printed once as registered (`REG`) and once as certified (`CER`) under the same license type.
    The snapshot keys TDLR licenses by type, subtype and number. Open: add the subtype to the TDLR key in the contract (a
