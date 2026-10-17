@@ -996,3 +996,67 @@ versioned rule, so a later change is a re-load, not a rewrite of history.
    prints the same types (PI on 1,308 rows statewide). The partners' names a `PI` row may print are the partnership's
    name as published, served like any other business name. The layout check guards the ruling at every load: a new
    sole-owner code, a withheld code described otherwise, or a visible number with the leading 2 turns it to `differs`.
+
+## 25. 2026-10-17 (night): T4 results, the corrections applied, and five points open for the operator
+
+T4 ran on the operator's go of 2026-10-17 (`docs/progress.md` T4; kit `docs/evidence/travis-t4-run-2026-10-17.json`;
+findings section 14). Egress was RO throughout; the only hosts contacted were data.austintexas.gov (which answers any
+country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was needed or made.
+
+**Applied in T4 by the agent, for the operator's review at the T4 checkpoint:**
+
+1. **Harvest shape.** One GET per (`permittype`, `calendar_year_issued`) partition, planned from the dataset's own
+   group-by counts (270 requests, the largest partition 21,926 rows), replaces section 4's "one bulk GET ... or SODA pages
+   with `$offset`". A permit never changes partition, so the request that captured it is the same in every run: its
+   `source_http_request` (section 3) stays put when rows are added elsewhere, and an unchanged permit keeps its record CID
+   from run to run (sections 6 and T10). The 7 applicant fields are never requested (the T1 privacy classification), and
+   neither is `issued_in_last_30_days`, which the publisher recomputes daily.
+2. **`tcad_id` evidence v2.** The "seven-character" values of 2026-10-16 are the Williamson Central Appraisal District
+   account form, `R` and six digits (103,848 rows, plus 21 printed `WCAD`; 89,550 of the 89,564 with coordinates lie north
+   of latitude 30.40). They get the reason `williamson_cad_account_form` and still end `invalid_quarantined`; the
+   proposed scope rule for them is point 6.
+3. **Work classifier v2.** v1 tested accessory terms before the new-building rule, so 42,287 new buildings (a new
+   residence "with covered porch" or "att carport", or one "W/No Gar Or Carport") were `accessory_roof` and 4 more
+   `needs_review`. v2: a `New` permit in a new-building class is `primary_roof_new_construction` unless its text names only
+   replacement work (56 legacy re-roofs coded `New` stay re-roofs) or only repair work (6 rows). Where such a permit is
+   `Final` with a completion date, the roof-age anchor moves from the built year (low) to new construction (medium). The
+   term vocabulary is unchanged; new terms still go through section 20's review loop.
+4. **Property Improvement records.** Printed facts only: `permit_number`, and the applied, issue, completion and close
+   dates the profile confirms (the close date only for `Final`). The four enums the class requires are written as null
+   (point 7). No `parcel_has_property_improvement`: section 16 allows at most one, and no single permit is the parcel's
+   permit. Everything else goes to a sidecar beside `data/`. The Seed root and the shared property, address and parcel
+   files are copied byte for byte from the appraisal output, so both archives give each property the same CID (checked
+   on the pilot and on the 1,000-parcel run).
+5. **Failure path.** The real pilot produced no failure, so a labelled fault drill on the pilot seed exercises it: an
+   injected permanent failure stays `failed_permanent` on `--resume`, and an injected timeout is `failed_retryable` and
+   completes on `--resume`. The drill is a separate run; its numbers are in no count of record.
+
+**Open for the operator, each with the agent's recommendation:**
+
+6. **Williamson County rows.** Recommended: treat the 103,869 Williamson-form permits as outside Travis. That means a
+   dated contract correction before T7's first deploy, adding `out_of_county` to `unlinked_reasons`, plus a limitation
+   "Austin permits on Williamson County parcels" with the count, and leaving them out of the Travis permit totals. The
+   alternative is to keep them `invalid_quarantined` (T4's state), which overstates Travis's unlinked share by 4.4 points.
+7. **The four required enums.** Recommended: publish `improvement_type` from the printed `permittype` code, one to one
+   on every row (`BP` GeneralBuilding, `EP` Electrical, `MP` MechanicalHVAC, `PP` Plumbing, `DS` DrivewayPermit). Keep
+   `improvement_status`, `improvement_action` and `contractor_type` null: `Expired`, `Active` and `Pending` have no
+   faithful status member, `work_class` values such as `Addition and Remodel` or `Shell` have no one-to-one action, and no
+   contractor type is printed. The alternative is all four null (T4's state). Either way T5 writes the choice once, and
+   the first published CIDs carry it.
+8. **Applicant fields.** The contract's `PermitDetail.applicant` ("as printed") contradicts the T1 privacy
+   classification, under which applicant fields are not collected; the harvester follows the classification.
+   Recommended: keep them uncollected and correct the contract before T7's first deploy, so that `applicant` is always
+   null with the reason "not collected: personal contact fields". The alternative is to collect `applicant_org` only,
+   after a privacy review.
+9. **Published scope, and the 48-hour gate.** Section 3 sets the `property_improvement` scope from the measured
+   throughput. The source acquisition takes 0.09 hours, so the kit's per-source gate holds. The full run with every
+   exactly linked permit of all five types (1,978,992 permits on 232,640 parcels) projects to 59.97 hours sequentially,
+   past the gate: `elephant-cli validate` of the County group alone takes 44.2 hours. With the CLI chain on 8 concurrent
+   shards per group (measured on the 1,000-parcel run) it projects to 15.47 hours. Recommended: T5 publishes all five
+   types and runs the CLI per 5,000-property shard, up to 8 shards in flight per group. The group stays
+   `supported_partial`: it covers Austin only, and 16.9% of the export's rows do not link. The alternative, building
+   permits only (435,019), shortens the permit group's CLI stages but not the County validation, which dominates.
+10. **Retired `geo_id`s.** 196,400 permits print one of 6,260 ten-digit ids that no 2026 account prints (their share
+    rises to 14.6% for the 2020s, which fits tracts subdivided after the permit). Recommended: keep them `no_candidate`
+    and list the count under limitations. Attaching them would need a TCAD parcel-lineage source (splits and merges),
+    and looking for one needs US egress; only worth a slot in a VPN window that is already planned.

@@ -287,3 +287,57 @@ mirror `oracle/travis/kit/…/runtime`: it holds the code only, with no `node_mo
 7. `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`
    → exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
 8. In the runtime directory, `npx vitest run tests/travis-*` → `Test Files 18 passed (18)`, `Tests 159 passed (159)`.
+
+## 6. T4 — permit profile, permit pilot and feasibility
+
+The harvest of record is the Austin export captured on 2026-10-17 (`v1792239863`, 270 partition requests, kit
+`docs/evidence/travis-t4-harvest-v1792239863.json`). Everything below reads that capture and the T1 seed. No VPN is needed:
+the only requests go to the public lexicon manifest and to data.austintexas.gov (steps 3 and 6), which answer from RO.
+Run record: kit `docs/evidence/travis-t4-run-2026-10-17.json`. Rulings and open points: decisions.md section 25.
+`t4-permit-fetch.mjs` captures a newer version under its own `v<rowsUpdatedAt>`; it is not part of this checklist.
+
+### Hand-off checklist (about 25 minutes)
+
+Run in `/Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`, not in the mirror. Each run writes a new
+directory under `data/travis/runs/`. The roots below hold while the live lexicon manifest's SHA-256 is `7084b933…` (each run
+records it in its `t4-run.json`); `total_s` and `elapsed_s` vary.
+
+```bash
+cli=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli
+run="node --max-old-space-size=12288 src/counties/travis/t4-run.mjs"
+```
+
+1. `node src/counties/travis/t4-permit-verify.mjs` → `t4-permit-verify: OK; 270 partitions, 274 receipts, 2,380,707 CSV
+   rows, 1813.8 MB; v1792239863 (rowsUpdatedAt 2026-10-17T12:24:23.000Z)`.
+2. `node --max-old-space-size=12288 src/counties/travis/t4-permit-links.mjs` (about 1.5 minutes) →
+   `"rows":2380707,"linked":1978992,"link_method":{"exact":1978992,"normalized_digits":0},"unlinked_reasons":{"no_candidate":259419,"multiple_candidates":38249,"invalid_quarantined":104047},"linked_parcels":232640,"digits_fallback_enabled":true,"new_unmapped_statuses":[]`.
+3. Pilot, `__ALL__` (2 minutes; 27 Socrata requests):
+   `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-pilot.csv --label pilot --cli $cli --cross-check-socrata`
+   → `"appraisal":{"seedRows":25,"success":25,"permanentFailure":0,"retryableFailure":0}`,
+   `"permit_states":{"done_zero_permits":20,"done":5},"permits_linked":145,"permits_published":145,"property_cid_check":true,"socrata_cross_check":"25/25 equal through 2026-10-16"`,
+   then `county validate 25/25 (0 error rows), CAR 471 blocks root baguqeerahe3ecgiyigcgdg6gmxqsmc5ylzlucf4kb3n5xcqi5tvtiebpv2ta, checks pass, 23 tables root baguqeeram5hefoyihxelublnx3hzdmbdxg5gavyukspzevkwnii7b5zexipq`
+   (T2's roots) and `property_improvement validate 5/5 (0 error rows), CAR 322 blocks root baguqeeram7n2d2uqpotfmu3bgmjrplguzny22ldvlwjnv4sk5hpjwohr4njq, checks pass, 7 tables root baguqeera7qlc2qavbgfy75sbznosxmkxsknmab35prsr6q7tqf2qejmw6i3a`.
+   Inspect one parcel: `ls "$(ls -d data/travis/runs/*-t4-pilot | tail -1)/830704/permit-data"` lists 5 `property_improvement_*.json`, their
+   relationships, the Property Improvement root `bafkreicyzy…json`, the Seed root and the copied property, address and parcel
+   files; `permit-source-payload.json` beside it holds the printed rows, the profile and the capture locator.
+4. Appraisal only, `__NONE__`: `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__NONE__ $run --seed data/seeds/travis-pilot.csv --label pilot-none --cli $cli`
+   → `"permit_states":{"not_eligible":25}`, the same County line as step 3, and `property_improvement no parcel in this group`.
+5. Failure paths: `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-pilot.csv --label pilot-drill --cli $cli --fault-drill permanent:547839,retryable:830704`
+   → `"permit_states":{"done_zero_permits":20,"failed_permanent":1,"done":3,"failed_retryable":1}` and
+   `property_improvement validate 3/3`; then
+   `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --resume "$(ls -d data/travis/runs/*-t4-pilot-drill | tail -1)" --cli $cli`
+   → `"attempt":2`, `"permit_states":{"done_zero_permits":20,"failed_permanent":1,"done":4}`, `property_improvement validate 4/4`.
+6. Feasibility, 1,000 parcels (about 13 minutes; 1,001 Socrata requests). The sample is reproducible:
+   `node src/counties/travis/t4-sample.mjs` → `"rows":1000,"sha256":"5fccc9c2deaca758c1f585a90621a56105f093ca445d72c1304748161ed9990c"`. Then
+   `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-feasibility-1000.csv --label feasibility-1000 --cli $cli --cross-check-socrata`
+   → `"appraisal":{"seedRows":1000,"success":1000,…}`, `"permit_states":{"done":530,"done_zero_permits":470},"permits_linked":4151,"permits_published":4151,"property_cid_check":true,"socrata_cross_check":"998/998 equal through 2026-10-16"`,
+   `county validate 1000/1000 (0 error rows), CAR 20138 blocks root baguqeerajznciv64kds7dilxfyy5mg33klp4ap2wxfe2frrag7cwhb6gau4a, checks pass, 24 tables root baguqeerag4dmbm2gzcqhvlzetfng4je6v6oklp2ny45azubq4ewv45sizrba`
+   and `property_improvement validate 530/530 (0 error rows), CAR 11484 blocks root baguqeeraajeuzganwzd64fxgwhcga4lsig35omoofvggisxkkmzbw4grp6xq, checks pass, 7 tables root baguqeera4fgbfvmjr7azmjfshzcumwdwgylfqy5gczqeb3a3i6seo5zoe3dq`.
+7. Projection (about 2 minutes):
+   `f=$(ls -d data/travis/runs/*-t4-feasibility-1000 | tail -1); for g in county property_improvement; do node src/counties/travis/t4-shard-bench.mjs --group-dir $f/validate/$g --shards 8 --cli $cli --out $f/shard-bench-$g-8.json; done; node src/counties/travis/t4-projection.mjs --feasibility $f --bench-county $f/shard-bench-county-8.json --bench-property_improvement $f/shard-bench-property_improvement-8.json`
+   → two `"all_passed":true` bench lines, then `"within_gate":false` for the sequential run (about 60 hours, `cli_county_validate` about 44
+   of them), `"sharded":{… "within_gate":true …}` (about 15 hours on 8 shards) and `"source_acquisition_h":0.089`. Hours depend on
+   the machine; the run of record measured 59.97 and 15.47.
+8. `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`
+   → exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
+9. In the runtime directory, `npx vitest run tests/travis-*` → `Test Files 26 passed (26)`, `Tests 191 passed (191)`.
