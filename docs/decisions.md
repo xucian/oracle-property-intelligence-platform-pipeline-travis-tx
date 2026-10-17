@@ -974,5 +974,11 @@ versioned rule, so a later change is a re-load, not a rewrite of history.
    every sales-tax row of organization type `IS` (sole owner), whatever the number's form, and treats no other type as a
    natural person. No number in the capture has the leading 2 of SSN-based numbers, but the record layouts that define
    the organization codes and the number forms (Socrata attachments of `jrea-zgmq` and `9cir-efmm`) were not captured;
-   the classification rests on the code names and the data (no `IS` name carries an entity word). Open: accept before
-   hosting, or ask for the two layout files in a later US window.
+   the classification rests on the code names and the data (no `IS` name carries an entity word). **Ruled (operator,
+   2026-10-17): capture the two layouts in the next US window, at the same VPN moment as the TSBPE re-run.** Applied:
+   the window source `comptroller-record-layouts` (resolved at fetch time from each dataset's metadata, behind the same
+   egress guard and receipts) and one command for both,
+   `node src/counties/travis/t3-vpn-fetch.mjs --only tsbpe-responsible-master-plumber,comptroller-record-layouts`; the
+   offline step `t3-load.mjs --only layouts` (`travis-t3-layout-check.v1`) then checks the organization codes and
+   number forms against `travis-t3-privacy.v1` and reports any change. Until the layouts land it reports
+   `awaiting_capture`, and the rule stays as it is.
