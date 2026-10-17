@@ -980,5 +980,19 @@ versioned rule, so a later change is a re-load, not a rewrite of history.
    egress guard and receipts) and one command for both,
    `node src/counties/travis/t3-vpn-fetch.mjs --only tsbpe-responsible-master-plumber,comptroller-record-layouts`; the
    offline step `t3-load.mjs --only layouts` (`travis-t3-layout-check.v1`) then checks the organization codes and
-   number forms against `travis-t3-privacy.v1` and reports any change. Until the layouts land it reports
-   `awaiting_capture`, and the rule stays as it is.
+   number forms against the privacy rule and reports any change.
+   **Outcome (2026-10-17, window run `20261017T192341Z`):** both layouts print the same table of 79 organization codes,
+   one-letter codes included, and two sole-owner types: `IS` "INDIVIDUAL - SOLE OWNER" (9,471 Travis outlets) and `S`
+   "SOLE PROPRIETORSHIP" (0 rows). Neither mentions Social Security numbers, and no taxpayer number of any type in the
+   capture starts with 2. Following this ruling (classify by the layouts), the rule became `travis-t3-privacy.v2`,
+   which withholds `IS` and `S`; the re-load rewrote the sales-tax snapshot under the new version and changed no row.
+   The layout check now reports `consistent` (kit `docs/evidence/travis-t3-record-layouts-2026-10-17.json`).
+   **Ruled (oracle agent, on the operator's delegation, 2026-10-17): `PI` "IND GENERAL PRTNSHP" (365 Travis outlets of
+   348 taxpayers), `PZ` "IND SUCCESSOR PRTSHP" (0), `ES` "ESTATE" (1) and `TR` "TRUST" (4) are not withheld.** The rule
+   exists so that no number derived from a Social Security number is stored or served, and only a natural person has
+   one. A partnership, an estate or a trust is a taxpayer of its own, with an employer number or a Comptroller-assigned
+   number: these rows print first digits 3 (Comptroller-assigned; 305 rows) and 1 (employer-number-based; 65), never 2.
+   The layouts list them apart from the two sole-owner types, and the franchise file, which holds only taxable entities,
+   prints the same types (PI on 1,308 rows statewide). The partners' names a `PI` row may print are the partnership's
+   name as published, served like any other business name. The layout check guards the ruling at every load: a new
+   sole-owner code, a withheld code described otherwise, or a visible number with the leading 2 turns it to `differs`.
