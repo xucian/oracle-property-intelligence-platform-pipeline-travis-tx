@@ -835,6 +835,9 @@ run `20261017T052903Z`, now evidence only).
 - **CIDs.** Every property CID differs from the amended pilot's; nothing was published or pinned. T4's permit
   transform must write `address.json` and `parcel.json` byte-identical to the appraisal transform's, so that the Seed
   root, and with it the property CID, is the same in both archives.
+- **Supersedes.** Section 17's "every Travis property fails `validate` on exactly that error until the enum is
+  extended" and section 18's "the lexicon merge is a hard dependency" held only for a Seed root carrying
+  `unnormalized_address`. Lexicon#194 now adds only the county label; T2 does not wait for it.
 - **Follow-ups.** The elephant-cli issue (draft, not filed: kit
   `docs/travis-elephant-cli-issue-property-seed-table-collision.md`); the kit gap reports (kit
   `docs/travis-kit-gap-reports.md`); lexicon#194 stays open with its Why edited (operator approval; not posted); the

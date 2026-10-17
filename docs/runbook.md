@@ -96,8 +96,9 @@ node bin/elephant-county.mjs replay --county travis --fixture fixtures/travis-re
 Runs offline: no `--live-fetch`, so no request to traviscad.org, gis.traviscountytx.gov or data.texas.gov
 (each seed row already carries its TNR geometry and the page query that returned it), and no egress check is
 needed. The only network request is the public lexicon manifest, which the adapter reads from
-`<run>/lexicon-manifest.json`. Blocker for `validate` to pass: the county enum lacks `Travis`
-(elephant-xyz/lexicon#194, open); until it merges every property fails on exactly that error.
+`<run>/lexicon-manifest.json`. `validate` passes against the live manifest: the Seed root is
+`address_has_parcel` only (decisions.md section 22), so the missing `Travis` in the county enums
+(elephant-xyz/lexicon#194, open) costs only the county label, not validation.
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
@@ -118,15 +119,18 @@ t2run data/seeds/travis-smoke.csv smoke
 t2run data/seeds/travis-pilot.csv pilot
 ```
 
-Expect: smoke 1 = 1 + 0 + 0; pilot `reconciled` 25 = 25 success + 0 permanent + 0 retryable, `geometryCount` 13,
-reconcile-export `rowCount` 25 = `expectedCount` 25; validate prints `Properties processed: 25, succeeded: 0,
-failed: 25`, and `travis-county-errors.csv` has 25 rows, all `/relationships/property_seed/to/county_jurisdiction`
-with value `Travis`. Inspect: `<run>/manifest.json` (`reconciled`, `timings`), one parcel's `data/` and its
-`source-payload.json` (the lexicon-gap sidecar, never in the archive), and the error CSV. The agent's run is kit
-`docs/evidence/travis-t2-run-20261016T215528Z.json`.
+Expect: smoke 1 = 1 + 0 + 0 and `Properties processed: 1, succeeded: 1, failed: 0`; pilot `reconciled` 25 = 25
+success + 0 permanent + 0 retryable, `geometryCount` 13, reconcile-export `rowCount` 25 = `expectedCount` 25;
+validate prints `Properties processed: 25, succeeded: 25, failed: 0`, and `travis-county-errors.csv` has no data
+rows. Inspect: `<run>/manifest.json` (`reconciled`, `timings`), one parcel's `data/` (the Seed root carries
+`address_has_parcel` only; no `property_seed.json` or `unnormalized_address.json` inside `data/`) and its
+`source-payload.json` (the lexicon-gap sidecar, never in the archive). The run of record is kit
+`docs/evidence/travis-t2-run-20261017T072132Z.json`.
 
-After lexicon#194 merges and the live manifest carries the new schema CIDs, re-run the pilot; `validate` must exit 0.
-Then, in the pilot's `validate` directory (no Atlas clone, no PR in v1):
+Then, in the pilot's `validate` directory (no Atlas clone, no PR in v1). Expect `CAR written … (471 blocks, root
+baguqeerahe3ecgiyigcgdg6gmxqsmc5ylzlucf4kb3n5xcqi5tvtiebpv2ta)`, "CAR passed every check" with the six error counts
+at 0, and `Tables written … (23 tables, 23 parts, root baguqeeram5hefoyihxelublnx3hzdmbdxg5gavyukspzevkwnii7b5zexipq)`;
+the roots are deterministic, so an unchanged seed and export reproduce them:
 
 ```bash
 $cli hash ./county --output-zip ./travis-county-hashed --output-csv travis-county-hash.csv --output-car travis-county.car
