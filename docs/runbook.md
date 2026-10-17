@@ -304,7 +304,7 @@ All commands run in the kit runtime directory and send no request:
 6. Readiness: `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`.
    Expect exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
 7. Tests: in the runtime directory, `npx vitest run tests/travis-*`. Expect `Test Files 16 passed (16)` and
-   `Tests 146 passed (146)`.
+   `Tests 147 passed (147)`.
 8. Read the numbers: kit `docs/evidence/travis-t3-run-2026-10-17.json` (`counts`, `deltas`, `matcher`, `limitations`):
    Travis against 2026-10-16 290 new, 1,418 changed, 294 tombstoned; 336,439 Travis taxpayers hold a statewide-unique
    name; veteran Travis subset 2,343; TDLR 35,981 contractor licenses. Then rule on decisions.md section 24.
