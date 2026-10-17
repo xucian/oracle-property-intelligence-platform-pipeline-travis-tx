@@ -914,3 +914,34 @@ window.
   (statewide franchise file, sales-tax outlets, TDLR and TSBPE files, the veteran-owned file, the detail-URL form). The
   findings note "no further VPN window is needed until run 2" no longer holds.
 
+
+## 24. 2026-10-17: T3 window results that need the operator's ruling (open)
+
+The T3 window run `20261017T160716Z` is verified and loaded offline (`docs/progress.md` T3; kit
+`docs/evidence/travis-t3-run-2026-10-17.json`). Four points need the operator's ruling. None is decided here: the loads
+follow the agent's reading until the operator rules, and each reading is a versioned rule, so a different ruling is a
+re-load, not a rewrite of history.
+
+1. **Veteran-owned join key.** Section 23 says the SOS Veteran Owned Business rows are "joined to the Comptroller rows
+   by exact SOS file number". The franchise file prints that number zero-padded to 10 digits (all 3,245,622 printed
+   values), the veteran file prints 9 digits (all 27,205), so equality of the printed values joins 0 rows. The loader
+   joins on the veteran number left-padded to 10 digits (`travis-sos-file-number-join.v1`): 25,466 rows join, 2,343 of
+   them to a Travis taxpayer, and the veteran file's own `taxid` equals the joined taxpayer number on 24,868 (16 differ,
+   582 blank). Open: confirm that the padded number is "exact" for this join, or rule otherwise.
+2. **Withheld numbers inside two digests.** `api-contract.md` defines `business_record_id` as the SHA-256 of the source
+   key and the printed key, and `unpublished_source.row_sha256` as the hash of the row as captured. For a sole owner's
+   sales-tax row (`record_id_withheld: individual_owner`; 9,471 Travis outlets) either digest can be reversed by trying
+   every 11-digit number, which contradicts "they never expose a withheld number". The private snapshot already keys
+   such a row by the hash of the row with the withheld cell emptied and stores only that hash. Open: a dated contract
+   correction (allowed until T7's first deploy, as in the change-control entries of 2026-10-17) that makes both digests
+   use the redacted row for withheld rows, or another rule.
+3. **`license_record_id` for TDLR.** The recipe "license number and type" is not unique in the TDLR files: 121 A/C
+   technician numbers are printed once as registered (`REG`) and once as certified (`CER`) under the same license type.
+   The snapshot keys TDLR licenses by type, subtype and number. Open: add the subtype to the TDLR key in the contract (a
+   correction of the same kind), or serve one record per number and type.
+4. **Who counts as an individual owner.** The privacy rule (`travis-t3-privacy.v1`) withholds the taxpayer number of
+   every sales-tax row of organization type `IS` (sole owner), whatever the number's form, and treats no other type as a
+   natural person. No number in the capture has the leading 2 of SSN-based numbers, but the record layouts that define
+   the organization codes and the number forms (Socrata attachments of `jrea-zgmq` and `9cir-efmm`) were not captured;
+   the classification rests on the code names and the data (no `IS` name carries an entity word). Open: accept before
+   hosting, or ask for the two layout files in a later US window.

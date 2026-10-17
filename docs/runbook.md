@@ -251,13 +251,60 @@ m=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/publi
 
 ## 5. T3 — the US-egress window (official identity baseline)
 
-The offline part of T3 is done (decisions.md section 23; `docs/progress.md`). With the VPN on, run the one line below. It
-asks `ipinfo.io/country` before every request and stops on anything but US (exit 3, nothing sent), writes a receipt per
-request under the gitignored `data/travis/t3-window/`, only downloads, and is resumable: after a stop or an
-`inconsistent` line, rerun the same line. Expect about 4 minutes (about 11 if data.texas.gov serves one page at a time;
-the statewide `9cir-efmm` file is 3.49 million rows in 70 pages, about 0.8 GB in all) and a last line
-`t3-vpn-fetch: 6/6 ok; …`; paste that line and the six `[source]` lines back.
+The offline part of T3 was done first (decisions.md section 23; `docs/progress.md`). With the VPN on, the operator ran
+the one line below on 2026-10-17 (run `20261017T160716Z`: US egress at all 104 checks, 103 requests, 170 s; 5 of 6
+sources ok). It asks `ipinfo.io/country` before every request and stops on anything but US (exit 3, nothing sent),
+writes a receipt per request under the gitignored `data/travis/t3-window/`, only downloads, and is resumable.
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node src/counties/travis/t3-vpn-fetch.mjs
 ```
+
+### Result (offline, agent, 2026-10-17)
+
+Every receipt verified, every capture loaded into the private registry and licensing snapshots, re-loads are no-ops
+(kit `docs/evidence/travis-t3-run-2026-10-17.json`). One source is missing: the TSBPE Responsible Master Plumber CSV.
+The run followed the site menu's description page of the same name and saved its HTML (kept on disk as evidence; the
+loader sets it aside). The resolver now takes `https://tsbpe.texas.gov/download-csv/RMP/` (kit commit `8af4bc3`).
+Four points wait for the operator's ruling: decisions.md section 24.
+
+### TSBPE: one window re-run (VPN on, US egress)
+
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node src/counties/travis/t3-vpn-fetch.mjs --only tsbpe-responsible-master-plumber
+```
+
+Expect a few seconds and a last line `t3-vpn-fetch: 1/1 ok; …`; paste it back. Then, offline: step 1 below (it checks the
+newest run) and `node --max-old-space-size=16384 src/counties/travis/t3-load.mjs --only tsbpe,name-index`, which reads
+the CSV header, resolves the license number, licensee and company columns (or stops and prints the header) and loads
+the licensing snapshot `tsbpe-responsible-master-plumber`.
+
+### Hand-off checklist (offline, no VPN; about 10 minutes)
+
+All commands run in the kit runtime directory and send no request:
+`cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`
+
+1. Receipts: `node src/counties/travis/t3-verify.mjs --run 20261017T160716Z`. Expect exit 0 and the last line
+   `t3-verify: OK; 106 files, 106 receipts, 4,451,607 CSV rows, 885.7 MB; run 20261017T160716Z`; the TSBPE line reads
+   `failed: 2 files verified, 0 CSV rows, 0.2 MB, not CSV: responsible-master-plumber-responsible-master-plumber.csv`.
+2. Watermarks before: `shasum -a 256 data/travis/registry/watermark.json data/travis/licensing/watermark.json`. Expect
+   `acec0ed5…` (registry) and `6de1f4ba…` (licensing).
+3. Re-load everything: `node --max-old-space-size=16384 src/counties/travis/t3-load.mjs` (about 8 minutes). Expect every
+   snapshot step to say `diff new 0, changed 0` … `removed 0; no-op` with these rows and snapshot prefixes:
+   `[franchise-statewide] 3,487,662 rows, 3,487,631 keys` (`2a102105f56e`), `[franchise-travis] 342,334 rows, 342,333
+   keys` (`942e8645eec3`), `[sales-tax] 49,025 rows, 39,554 keys` (`7c510df7ea0e`), `[veteran] 27,205 rows, 27,205
+   keys` (`988727bb91ca`), `[tdlr] 887,715 rows, 459,992 keys` (`2e3ab26003d6`); `[veteran-join] unchanged (25466 of
+   27205 veteran rows joined (Travis 2343); …)`; `[tsbpe] awaiting_capture (…)`; `[name-index] unchanged (…)`; last line
+   `t3-load: 8 steps; all no-op (0 new, 0 changed, 0 removed; identical bytes); awaiting capture: tsbpe; …`.
+4. Watermarks after: the command of step 2 prints the same two digests.
+5. Privacy: `node src/counties/travis/t3-privacy-check.mjs`. Expect exit 0 and a JSON line with
+   `"classed_rows_in_capture":9471`, `"withheld_values_in_capture":9088`, every `withheld_values_in_…` and
+   `captured_row_hashes_in_snapshot` 0, and `"ok":true`: no sole owner's taxpayer number, nor the hash of the row as
+   captured, is in any derived file.
+6. Readiness: `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`.
+   Expect exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
+7. Tests: in the runtime directory, `npx vitest run tests/travis-*`. Expect `Test Files 16 passed (16)` and
+   `Tests 146 passed (146)`.
+8. Read the numbers: kit `docs/evidence/travis-t3-run-2026-10-17.json` (`counts`, `deltas`, `matcher`, `limitations`):
+   Travis against 2026-10-16 290 new, 1,418 changed, 294 tombstoned; 336,439 Travis taxpayers hold a statewide-unique
+   name; veteran Travis subset 2,343; TDLR 35,981 contractor licenses. Then rule on decisions.md section 24.
