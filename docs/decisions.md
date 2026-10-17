@@ -915,19 +915,20 @@ window.
   findings note "no further VPN window is needed until run 2" no longer holds.
 
 
-## 24. 2026-10-17: T3 window results that need the operator's ruling (open)
+## 24. 2026-10-17: T3 window results ruled by the operator
 
 The T3 window run `20261017T160716Z` is verified and loaded offline (`docs/progress.md` T3; kit
-`docs/evidence/travis-t3-run-2026-10-17.json`). Four points need the operator's ruling. None is decided here: the loads
-follow the agent's reading until the operator rules, and each reading is a versioned rule, so a different ruling is a
-re-load, not a rewrite of history.
+`docs/evidence/travis-t3-run-2026-10-17.json`). Four points needed a ruling; the operator ruled on all four on
+2026-10-17 (point 2 delegated to the `oracle` agent, which arceus named as the closest owner). Each ruling is a
+versioned rule, so a later change is a re-load, not a rewrite of history.
 
 1. **Veteran-owned join key.** Section 23 says the SOS Veteran Owned Business rows are "joined to the Comptroller rows
    by exact SOS file number". The franchise file prints that number zero-padded to 10 digits (all 3,245,622 printed
    values), the veteran file prints 9 digits (all 27,205), so equality of the printed values joins 0 rows. The loader
    joins on the veteran number left-padded to 10 digits (`travis-sos-file-number-join.v1`): 25,466 rows join, 2,343 of
    them to a Travis taxpayer, and the veteran file's own `taxid` equals the joined taxpayer number on 24,868 (16 differ,
-   582 blank). Open: confirm that the padded number is "exact" for this join, or rule otherwise.
+   582 blank). **Ruled (operator, 2026-10-17): approved.** The SOS file number left-padded to 10 digits counts as the
+   exact SOS file number (`travis-sos-file-number-join.v1`).
 2. **Withheld numbers inside two digests.** `api-contract.md` defines `business_record_id` as the SHA-256 of the source
    key and the printed key, and `unpublished_source.row_sha256` as the hash of the row as captured. For a sole owner's
    sales-tax row (`record_id_withheld: individual_owner`; 9,471 Travis outlets) either digest can be reversed by trying
