@@ -261,10 +261,13 @@ the sole-owner outlets (decisions.md 24.2). Keep one copy in your password manag
 
 ### Hand-off checklist (offline, about 12 minutes)
 
-Run in `/Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`; nothing is sent.
+Run in `/Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`; nothing is sent. Not in this repo's
+mirror `oracle/travis/kit/…/runtime`: it holds the code only, with no `node_modules` and no `data/`.
 
 1. `for r in 20261017T160716Z 20261017T192341Z; do node src/counties/travis/t3-verify.mjs --run $r | tail -1; done` →
-   `t3-verify: OK; 112 files, 112 receipts, 4,460,985 CSV rows, 888.0 MB; run <r>`, once per run.
+   `t3-verify: OK; 112 files, 112 receipts, 4,460,985 CSV rows, 888.0 MB; run <r>`, once per run. Without `| tail -1`,
+   the TSBPE line reads `failed: … not CSV: responsible-master-plumber-responsible-master-plumber.csv`: the first run's
+   saved HTML page, kept as evidence; its CSV came in the second run.
 2. `node src/counties/travis/t3-record-id-key.mjs fingerprint` → `"fingerprint":"a85dc5bf94154a97"`.
 3. `shasum -a 256 data/travis/registry/watermark.json data/travis/licensing/watermark.json` → `beb3d529…` and
    `ff62b029…`.
