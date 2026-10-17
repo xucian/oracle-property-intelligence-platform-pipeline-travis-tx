@@ -139,28 +139,63 @@ $cli export-tables travis-county.car --output ./travis-county-tables --part-size
   --atlas-page ./atlas-page/counties/TX/travis.json --county travis --state TX --fips 48453     # local page file only
 ```
 
-### Upload with readback (needs the credential mapping; no Atlas PR)
+### Upload with readback (staged for the operator's go; not run)
 
-The kit CLI reads `FILEBASE_ACCESS_KEY`, `FILEBASE_SECRET_KEY` and `FILEBASE_BUCKET`. The operator's
-git-ignored `.env` in this repository holds `FILEBASE_ACCESS_TOKEN` and `FILEBASE_SECRET_KEY` (and the
-Pinata variables); there is no bucket name yet. Operator action before the first upload: create or
-pick the Filebase bucket, then export the variables in the shell that runs the upload, never in a
-file that is committed:
+Option B (decisions.md section 22): the run of record `20261017T072132Z` validated, hashed and exported against the
+live manifest, so no amended schemas need pinning. Nothing below has been run. The credentials stay in the
+git-ignored `.env` (`FILEBASE_ACCESS_TOKEN`, `FILEBASE_SECRET_KEY`, `FILEBASE_BUCKET=travis-tx-oracle-pipeline`,
+`PINATA_JWT_SECRET_ACCESS_TOKEN`) and are loaded into the shell that runs the upload only; never echo them or write
+them to a file. The CLI reads `FILEBASE_ACCESS_KEY`, `FILEBASE_SECRET_KEY` and `FILEBASE_BUCKET` and composes the
+Filebase token itself. In order:
 
 ```bash
-set -a; . /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/.env; set +a
-export FILEBASE_ACCESS_KEY="$FILEBASE_ACCESS_TOKEN"      # the token is the Filebase access key
-export FILEBASE_BUCKET='<bucket name, to be created>'
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
+RUNTIME=$PWD; A=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx
+cli=$A/node_modules/.bin/elephant-cli
+run_id=20261017T072132Z
+car_root=baguqeerahe3ecgiyigcgdg6gmxqsmc5ylzlucf4kb3n5xcqi5tvtiebpv2ta
+tables_root=baguqeeram5hefoyihxelublnx3hzdmbdxg5gavyukspzevkwnii7b5zexipq
+cd data/travis/runs/$run_id-pilot/validate
+
+# 1. Credentials into this shell only
+set -a; . $A/.env; set +a
+export FILEBASE_ACCESS_KEY="$FILEBASE_ACCESS_TOKEN"        # the 20-character token is the Filebase S3 access key
+[ "$FILEBASE_BUCKET" = travis-tx-oracle-pipeline ] && echo "bucket ok" || echo "STOP: FILEBASE_BUCKET is not travis-tx-oracle-pipeline"
+
+# 2. The artifacts are the ones the run record holds
+shasum -a 256 travis-county.car travis-county-tables/tables.car
+#    expect 62456f387fd6b25466c63ba6f8b4bbf2020c2b1fa963f71a82b3541bf8a1ebc6  travis-county.car
+#           d2aaf5fc2bbfdcf2f115c89b93bd2fc976a924b50a16e2dbff2b5ec4a3e960c9  travis-county-tables/tables.car
+
+# 3. Upload the archive, then the tables (every part added and pinned, then tables.car), to Filebase over Kubo RPC;
+#    the CLI reads each root back through https://ipfs.filebase.io
 $cli upload travis-county.car --api https://rpc.filebase.io --output-json travis-county-upload.json
 $cli upload ./travis-county-tables --api https://rpc.filebase.io --output-json travis-county-tables-upload.json
-# readback through a second public gateway on the archive root and the tables root:
-root=$(python3 -c "import json;print(json.load(open('travis-county-upload.json'))['root'])")
-curl -sI "https://dweb.link/ipfs/$root" | head -1; curl -sI "https://ipfs.io/ipfs/$root" | head -1
+
+# 4. CID readback: the uploaded roots are the recorded ones, and the tables point back at the archive
+python3 -c "import json,sys; c=json.load(open('travis-county-upload.json')); t=json.load(open('travis-county-tables-upload.json')); ok=c['root']=='$car_root' and t['root']=='$tables_root' and t.get('countyRoot')=='$car_root'; print('roots match' if ok else 'STOP: root mismatch'); sys.exit(0 if ok else 1)"
+
+# 5. Second pin: Pinata pin-by-CID of every root, each confirmed pinned before the gateway checks
+node $RUNTIME/src/counties/travis/publish.mjs pin --cids $car_root,$tables_root --name-prefix travis-county-$run_id --output pins.json
+
+# 6. ipfs.io and dweb.link checks on both roots and every table part (sha2-256 against each CID's multihash)
+parts=$(python3 -c "import json; print(','.join(p['cid'] for p in json.load(open('$RUNTIME/docs/evidence/travis-t2-run-$run_id.json'))['tables']['parts']))")
+node $RUNTIME/src/counties/travis/publish.mjs gateway-check --cids $car_root,$tables_root,$parts --gateways https://ipfs.io,https://dweb.link --output gateway-checks.json
+
+# 7. publish/<run_id>/manifest.json in this repository (never lists itself), then pin it (cidVersion 1; the CID
+#    must equal its local raw CID)
+node $RUNTIME/src/counties/travis/publish.mjs manifest --run-record $RUNTIME/docs/evidence/travis-t2-run-$run_id.json \
+  --car-upload travis-county-upload.json --tables-upload travis-county-tables-upload.json \
+  --gateway-checks gateway-checks.json --pins pins.json --hash-csv travis-county-hash.csv \
+  --output $A/publish/$run_id/manifest.json
+node $RUNTIME/src/counties/travis/publish.mjs pin-file --file $A/publish/$run_id/manifest.json --name travis-publish-manifest-$run_id
 ```
 
-Pinata is the second pin (pin-by-CID of every root), run after the Filebase readback; the Pinata JWT
-is `PINATA_JWT_SECRET_ACCESS_TOKEN` in `.env` (the CLI's `upload` reads `PINATA_JWT` for ZIP input
-only; pin-by-CID goes through Pinata's API in the publication script of T6).
+Expect: both uploads print their root with a successful readback; step 4 prints `roots match`; `pins.json` lists both
+roots as pinned; every `gateway-checks.json` row is `match` (a timeout is `unverified`, never a mismatch; re-run it);
+the manifest lists 26 objects (both roots, 23 table parts, the County schema). Reply with the two upload summaries,
+`pins.json`, `gateway-checks.json` and the manifest CID; the agent records them in the run record (`readback_url`,
+`gateway_checks[]`, `manifest_cid`). No Atlas PR in v1.
 
 ## 4. Requests the operator submits (drafted, not submitted)
 
