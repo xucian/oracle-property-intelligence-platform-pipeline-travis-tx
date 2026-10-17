@@ -796,3 +796,46 @@ it the four pre-implementation reviews are done and `api-contract.md` v1 is froz
   the kill switch and the alarms: about 2 to 3 more hours. The contract's first T7 commit is the Zod package and the
   committed `openapi.json`, which the CRM pins.
 
+## 22. 2026-10-17: the Seed root is address_has_parcel only; the amended lexicon leaves T2
+
+Recorded from the read-only oracle assessment the operator requested through arceus (option B). It supersedes the
+amended-lexicon route of 2026-10-17 (kit evidence `docs/evidence/travis-t2-lexicon-amended-a0c05c5-plus-travis.json`,
+run `20261017T052903Z`, now evidence only).
+
+- **Seed root.** Each property's Seed root carries `address_has_parcel` only (the County group's `address.json` to
+  `parcel.json`): the root `elephant-cli transform` writes itself (`writeSeedGroup`, elephant-cli #251; kit
+  `skills/build-county-transform/reference/scripts-mode.md` 23-27), and the shape of the only county published with
+  tables (Jackson, FL: `address`, `address_has_parcel`, `parcel`, `properties`, `property`, `property_has_address`).
+  `property_seed` and `unnormalized_address` are no longer written into the archive. Their values duplicate archive
+  fields (`parcel_id` is `parcel.parcel_identifier`, `full_address` is `address.unnormalized_address`, the coordinates
+  are the geometry's) except `county_jurisdiction`. Section 16's `prior_parcel_id` was never written. The Seed root
+  stays mandatory (`hash` derives the property CID from it); section 16's entity list for it is replaced by this one.
+- **Why not the full root.** It validated only against an amended lexicon (the live state `a0c05c5` plus #194's two
+  enum lines) served on 127.0.0.1, while the kit and Atlas's PR gate validate against the live manifest; and
+  `elephant-cli export-tables` at `44bb182` (main HEAD, no fix open) refuses it with "table property_seed has two
+  schemas in this car": the Seed group's relationship key `property_seed` is also the `property_seed` class table's
+  name. B is the kit's lexicon-valid workaround after a reported bug, and the CLI's own default.
+- **Result.** Run of record `20261017T072132Z` against the live manifest (sha256 `7084b933…`, no local server, no
+  `ELEPHANT_*` overrides): smoke `20261017T072127Z` (830704) 1 of 1; pilot 25 = 25 + 0 + 0, 13 with geometry,
+  reconcile-export 25 of 25; `validate` 25 of 25 with 0 errors. `hash`: `travis-county.car`, 471 blocks, root
+  `baguqeerahe3ecgiyigcgdg6gmxqsmc5ylzlucf4kb3n5xcqi5tvtiebpv2ta`; CAR validation: integrity, root, index, graph,
+  lexicon and orphans 0 (25 properties, 50 data groups). `export-tables --part-size 128m`: 23 tables in 23 parts, 444
+  rows, root `baguqeeram5hefoyihxelublnx3hzdmbdxg5gavyukspzevkwnii7b5zexipq`; every class (9) and relationship key
+  (13) the transform emits has a table. Local Atlas page `counties/TX/travis.json`, group `county`, schema the live
+  County CID. Evidence: kit `docs/evidence/travis-t2-run-20261017T072132Z.json`.
+- **The county label is a lexicon gap.** No field in the archive names the county: `address.county_name` is omitted
+  until lexicon#194 is live, and `unnormalized_address` is not written. The county is named by the Atlas page
+  (`counties/TX/travis.json`, FIPS 48453), the run record and the README manifest. Adding the label later is a new
+  snapshot with new CIDs.
+- **Wrong-county check.** Because nothing in the archive names the county, the adapter fails closed with
+  `assertTravisIdentity`: the seed row's county is Travis and FIPS 48453; every entity's `request_identifier` is the
+  row's `parcel_id`; every `source_http_request` host is `traviscad.org` or `gis.traviscountytx.gov` (T4's permit
+  entities add `data.austintexas.gov`); `address.state_code` is TX and `address.county_name` absent or Travis; every
+  geometry point inside the Travis bbox. `county_jurisdiction` stays internal (the adapter's seed files beside `data/`).
+- **CIDs.** Every property CID differs from the amended pilot's; nothing was published or pinned. T4's permit
+  transform must write `address.json` and `parcel.json` byte-identical to the appraisal transform's, so that the Seed
+  root, and with it the property CID, is the same in both archives.
+- **Follow-ups.** The elephant-cli issue (draft, not filed: kit
+  `docs/travis-elephant-cli-issue-property-seed-table-collision.md`); the kit gap reports (kit
+  `docs/travis-kit-gap-reports.md`); lexicon#194 stays open with its Why edited (operator approval; not posted); the
+  runbook's T2 expectation now says validate passes against the live manifest.
