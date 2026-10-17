@@ -966,8 +966,10 @@ versioned rule, so a later change is a re-load, not a rewrite of history.
      snapshot. `api-contract.md` change control, 2026-10-17.
 3. **`license_record_id` for TDLR.** The recipe "license number and type" is not unique in the TDLR files: 121 A/C
    technician numbers are printed once as registered (`REG`) and once as certified (`CER`) under the same license type.
-   The snapshot keys TDLR licenses by type, subtype and number. Open: add the subtype to the TDLR key in the contract (a
-   correction of the same kind), or serve one record per number and type.
+   The snapshot keys TDLR licenses by type, subtype and number. **Ruled (operator, 2026-10-17): approved.** The TDLR key
+   is (type, subtype, number), a blank subtype the empty string, as a dated contract correction (`api-contract.md`
+   change control, 2026-10-17). Applied: 459,993 TDLR licenses, 459,993 ids, none shared, none missing (the one row
+   without a subtype now has an id); the snapshot and the licensing watermark are unchanged.
 4. **Who counts as an individual owner.** The privacy rule (`travis-t3-privacy.v1`) withholds the taxpayer number of
    every sales-tax row of organization type `IS` (sole owner), whatever the number's form, and treats no other type as a
    natural person. No number in the capture has the leading 2 of SSN-based numbers, but the record layouts that define
