@@ -842,3 +842,75 @@ run `20261017T052903Z`, now evidence only).
   `docs/travis-elephant-cli-issue-property-seed-table-collision.md`); the kit gap reports (kit
   `docs/travis-kit-gap-reports.md`); lexicon#194 stays open with its Why edited (operator approval; not posted); the
   runbook's T2 expectation now says validate passes against the live manifest.
+
+## 23. 2026-10-17: T3 rulings: the registry equivalent, licensing, business records and scope
+
+Approved by the operator on 2026-10-17, from the read-only `oracle` ruling requested under the operator's rule that
+README.md is law: deliver what it asks unless the regular sources provably lack the data, and show a proven gap as
+missing. Egress was RO during the ruling, so data.texas.gov, tdlr.texas.gov and tsbpe.texas.gov were not contacted;
+their contents below come from the Socrata Discovery API catalog and web search and are re-checked live in the next US
+window.
+
+- **Corporate registry (supersedes section 4's "approved exception" and "registry candidates only", and section 5's
+  "business = Comptroller taxpayer number (a registry candidate, not identity)").** The Comptroller's Active Franchise
+  Taxpayers file (`9cir-efmm`) is the Travis profile's official corporate-registry equivalent under
+  `sunbiz-corporate-ingest` (SKILL.md 13-15) and `permit-evidence-preflight.md` (188-190): an official state record of
+  each franchise-tax entity carrying the Secretary of State's registry key. The SOS file number is on 335,980 of the
+  342,338 cached Travis rows (98.14%), with the SOS status code, charter and status dates and the right-to-transact
+  code. The SOS stays the authority of record and SOSDirect an optional human payment decision. Gaps, from the file's 18
+  columns: no registered agent or other filing roles, no assumed names, no entities outside franchise tax, no ended
+  accounts and so no history. A row is the official record of its taxpayer (`taxpayer_number` and SOS file number as
+  printed); a link from a permit contractor or a roll owner to a row is a review candidate, never identity (oracle.md
+  107-108). The inert `corporate-registry` entry under `approved_exceptions` is replaced by a profile entry naming the
+  equivalent, its limits and the operator's approval. Each row's provenance is its bulk capture (request, `fetched_at`,
+  SHA-256, offset); a per-taxpayer Comptroller detail URL is added only once its form is confirmed under US egress, and
+  the bulk page is never written as a company's `source_http_request`.
+- **Licensing.** Proven missing: no Austin permit prints a license number (68 named columns, 82 in the Socrata catalog
+  with 4 location sub-fields and 10 computed regions, none license-related; license markers in free text on 14 of about
+  2.38 million rows and in no contractor field); Texas issues no roofing license (RCAT's credential is voluntary,
+  enrichment at most); 18 of the 33,351 building permits mentioning roof name a licensed trade. Acquired in T3 as dated,
+  digested snapshots: TDLR's daily license files (the data.texas.gov copy is `7358-krk7`), TSBPE's free licensee lists
+  (the Responsible Master Plumber CSV with the last known company) and the City of Austin's Active Right of Way
+  Contractor License Holders (`8d92-wsiw`). A name match to a license row is a `license_candidate`, never identity.
+  **Historical qualification** (which license holder backed which business on a permit's date) is closed for v1 by the
+  operator on 2026-10-17: the README does not ask for it, Texas has no roofing license, and no public file carries the
+  dated relationship, so no records requests are filed and the gap is listed under limitations. The live manifest
+  (2026-10-17, 159 entries, sha256 `7084b933…`) has no `license` class and no company-to-license relationship; the gap is
+  recorded and no other edge is substituted (oracle.md 119-122).
+- **Contractor records.** The README's contractor record (README.md 32, 76, 106, 111) is the permit's listed contractor
+  as printed, served as `identity_status: source_name_attribution` with the permit's provenance and
+  `official_identity: null` with its proven reason. oracle.md 52-53 and 111-114 govern identity records and edges, and
+  the kit keeps the raw contacts (oracle.md 47-48; preflight 195-198, 223-225): both hold.
+- **Business records (README.md 34, 94).** Proven missing in the lexicon: no corporate-registry group among the live
+  manifest's 16 data groups; `company` holds only `name` and the nullable Florida `sunbiz_document_number` under
+  `additionalProperties: false`; `Business_Location` is the places shape and a franchise row is a mailing address. The
+  rows are therefore not eligible for IPFS (README.md 49, 59; oracle.md 22-24). They load on the internal `registry`
+  track with its loader watermark and, at deploy, into one source-shaped DuckDB table `business_records` built by
+  `packages/deploy-build` from the run's own capture, verified against `sources[].sha256`, labelled `unpublished_source`
+  per row, never attributed to a CID, never named or laid out as a lexicon class table, never registered, never read
+  from the Query DB. This extends section 20 from fields on published records to records the lexicon cannot hold. The
+  versioned exact-unique-normalized-name matcher runs in internal reconciliation and again at deploy, and the counts
+  reconcile. Contract, before T7's first deploy: `counts.registry_rows_loaded` and `Contractor.registry_candidates[]`
+  lose the "unless a `corporate_registry` group is published" condition; additive and nullable:
+  `Contractor.license_candidates[]`, a business and license read path in REST, MCP and the agent, and one `deploy.reads[]`
+  and Run `sources[]` entry per business or licensing source.
+- **Further business sources.** The Comptroller's Active Sales Tax Permit Holders (`jrea-zgmq`: outlet addresses, outlet
+  county, NAICS, permit and first-sale dates, entity types outside franchise tax) is loaded for Travis outlets the same
+  way, or its exclusion is recorded with proof; its individual-owner rows get a privacy classification before hosting and
+  no SSN-derived taxpayer number is served; whether `Business_Location` fits outlets is a `mew` lookup. The SOS Veteran
+  Owned Business file (`2vfr-72e4`) is loaded for its Travis subset and joined to the Comptroller rows by exact SOS file
+  number.
+- **Scope.** The business-records load is Travis (`taxpayer_county_code` 227, the mailing county). The statewide file
+  (3,486,216 rows on 2026-10-16) is the private matching universe (README.md 37, 79): of 14,477 roofing building permits
+  that print a company, at least 4,077 (28.2%) print a contractor city outside Travis, and 629 normalized names already
+  map to more than one taxpayer within Travis. Out-of-county rows enter `business_records` only as matched candidates of
+  a Travis permit or roll owner, flagged by scope.
+- **Kit inconsistency (reported with the kit gap reports).** county-permit-adapter SKILL.md 9-13 and county-ingest-run
+  SKILL.md 9-18 block permit harvest until an adequate licensing snapshot exists; permit-evidence-preflight.md 221-231,
+  284-287 and 313-317 block only historical qualification of permits without a license number. Travis follows the
+  preflight, which county-permit-adapter 16-17 names as the identity procedure, and README.md 29.
+- **Effect on the plan.** T3 starts now offline (Travis load, the Austin right-of-way snapshot, the matcher and its
+  fixtures, profile edits, the contract additions, a VPN-only fetch script) and closes after one short US window
+  (statewide franchise file, sales-tax outlets, TDLR and TSBPE files, the veteran-owned file, the detail-URL form). The
+  findings note "no further VPN window is needed until run 2" no longer holds.
+
