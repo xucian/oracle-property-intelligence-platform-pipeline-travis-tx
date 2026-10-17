@@ -76,7 +76,7 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 | `roof_work_class` | The Travis permit profile's fixture-tested mapping of exact source terms in `description`, `work_class` and `permit_class` to one of `primary_roof_replacement`, `primary_roof_new_construction`, `repair_or_coating`, `accessory_roof`, `other`, `needs_review`; `work_classifier_version` names the profile version. No regex is applied at query time. Unmapped or contradictory text is `needs_review`. Trade permits (`EP`, `MP`, `PP`) are `other`. |
 | Roofing permit | `is_roofing` = `roof_work_class` in {`primary_roof_replacement`, `primary_roof_new_construction`, `repair_or_coating`, `accessory_roof`}. Drives the open/stalled permit signal and the counts. `needs_review` rows are neither roofing nor not: they are excluded from the signal and counted separately. |
 | Re-roof permit | `is_reroof` = `roof_work_class = primary_roof_replacement`. The only class that may reset a roof's age. |
-| Roof age | Computed by the kit's estimator (`elephant.roof-age-estimate.v1`). Anchor: the `completed_date` or close date of the latest completed `primary_roof_replacement` → `roof_age_basis = completed_replacement`, `roof_age_confidence = high`; else of a completed `primary_roof_new_construction` → `new_construction`, `medium`; else `year_built` → `year_built`, `low`; else `null`, `none` (these `roof_age_basis` values are the API's names for the estimator's eligibility reason codes; the mapping is fixed in the profile fixtures). Open permits, repairs, coatings and accessory roofs never reset age. No date is synthesized: a permit without a valid completion or close date is not an anchor whatever its status, and `issued_date` is never used. `roof_year` = year of the anchor; `roof_age_years` = year of `roof_age_as_of` − `roof_year`. `roof_age_anchor` = `{permit_id, date, date_field}` for a permit anchor, `{source_field: "year_built"}` for the built-year fallback, or null; `roof_age_caveats[]` carries the estimator's codes (for example `partial_history`). |
+| Roof age | Computed by the kit's estimator (`elephant.roof-age-estimate.v1`). Anchor: the `completed_date` or close date of the latest completed `primary_roof_replacement` → `roof_age_basis = completed_replacement`, `roof_age_confidence = high`; else of a completed `primary_roof_new_construction` → `new_construction`, `medium`; else `year_built` → `year_built`, `low`; else `null`, `none` (these `roof_age_basis` values are the API's names for the estimator's eligibility reason codes; the mapping is fixed in the profile fixtures). Open permits, repairs, coatings and accessory roofs never reset age. No date is synthesized: a permit without a valid completion or close date is not an anchor whatever its status, and `issued_date` is never used. `roof_year` = year of the anchor; `roof_age_years` = year of `roof_age_as_of` − `roof_year`. `roof_age_anchor` is one of two shapes told apart by their keys, `{permit_id, date, date_field}` for a permit anchor or `{source_field: "year_built"}` for the built-year fallback, or null; `roof_age_caveats[]` carries the estimator's codes (for example `partial_history`) as an open list of strings: new codes may appear. |
 | Age threshold | "Older than N years" is **strict**: a property matches when `roof_age_years > roof_age_min`. |
 | Status group | From the profile's exact mapping of `status_current`: `open` = `Active`, `Pending Permit`, `On Hold`, `Re Review`, `Suspended`, `Inactive Pending Revision`. `stalled` = `Expired` with `completed_date_evidence` other than `confirmed_present`. `closed` = `Final`, `Withdrawn`, the exact `Cancelled …` values the export prints (enumerated in the profile fixtures), `VOID`, `Aborted`, and `Expired` with a confirmed `completed_date`. **`needs_review`** = any value outside the mapping. `needs_review` rows are excluded from the `open`, `stalled` and `closed` counts and from the open-permit signal; their count is `/v1/meta.counts.permits_needs_review` and the values are listed under `limitations`. The profile maps lifecycle status for the roof-age estimator separately: only `Final` is `completed`; `Withdrawn`, `Cancelled`, `VOID`, `Aborted` and `Expired` are `other`, so `closed` never reads as completed work. |
 | Status source | `status_observed_at` = the observation time of the row that supplied `status`: the `fetched_at` of the run's capture of the export. The export's `:updated_at` is its daily publish time, not an observation of the permit, and is not used. `status_source` = `indexed` (the Socrata export) or `live` (the permit's public page); it names where the value was observed and is not one of the kit's evidence states. v1 serves `indexed` only; live refresh of open roofing permits is a listed limitation. |
@@ -301,10 +301,10 @@ identity; BBB access is blocked; search centers are parcel centroids; durations 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `property_id` | string | TCAD `PROP_ID` as printed, never normalized |
-| `geo_id` | string | TCAD Geographic ID as printed; backed by `unpublished_source` (the lexicon has no home for it) |
+| `geo_id` | string or null | TCAD Geographic ID as printed; null when the roll prints none; backed by `unpublished_source` (the lexicon has no home for it) |
 | `address` | `{line1, city, zip}` | situs address from the roll, fields null when absent |
-| `lat`, `lon` | number | parcel centroid; permit coordinates only when the parcel has none |
-| `coordinate_basis` | `parcel_centroid`, `permit` | |
+| `lat`, `lon` | number or null | parcel centroid; permit coordinates only when the parcel has none; null when neither exists. Radius searches never return a property without coordinates; county-wide searches do, with `distance_miles` null |
+| `coordinate_basis` | `parcel_centroid`, `permit` or null | null exactly when `lat` and `lon` are null |
 | `year_built` | int or null | from improvement details |
 | `roof_year`, `roof_age_years`, `roof_age_basis`, `roof_age_confidence`, `roof_age_anchor`, `roof_age_as_of`, `roof_age_caveats[]` | see definitions | the estimator's output |
 | `last_roofing_permit` | `{permit_id, date, status_group, roof_work_class}` or null | latest `is_roofing` permit |
@@ -385,11 +385,11 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
 | `counts`, `deltas` | per table: loaded, new, changed, unchanged, dead, invalid, retryable; appraisal reconciles as `seed = ready + dead + invalid` |
 | `limitations[]` | `{source, availability, source_access_status, incomplete_reason, detail, evidence, records_request}` |
 | `evidence_states`, `unlinked_reasons` | as in `/v1/meta` |
-| `groups` | `{<group>: {cid, schema, tables}}`, one entry per published data group (CIDv1 base32) |
+| `groups` | a map `{<group>: {cid, schema, tables}}`, one entry per published data group (CIDv1 base32); new groups may appear |
 | `manifest_cid` | CIDv1 base32 |
-| `atlas` | `{page_path, pr_url, validate_state, merge_state, revert_issue_url, ipns, index_cid, mcp_sync}` or null; `ipns` is the global `elephant-atlas` name |
+| `atlas` | `{page_path, pr_url, validate_state, merge_state, revert_issue_url, ipns, index_cid, mcp_sync}` or null; every field a string or null; `ipns` is the global `elephant-atlas` name |
 | `cars[]` | `{root_cid, group, kind: "archive"\|"tables", schema_cid, block_count, car_validation, path, size, sha256, readback_url}`: one entry per group archive and one per `tables.car`; the CAR file is an export of `root_cid`, not a separately pinned object; `car_validation` holds the six per-check counts of `elephant-cli validate` |
-| `gateway_checks[]` | `{cid, codec, gateway, status, size, sha256, multihash, checked_at}` for ipfs.io and dweb.link, on roots; digests are compared as multihashes when codecs differ |
+| `gateway_checks[]` | `{cid, codec, gateway, status, size, sha256, multihash, checked_at}` for the two public gateways the run names (`gateway` is a string: ipfs.io and dweb.link stopped serving scripted clients in 2026), on roots; digests are compared as multihashes when codecs differ |
 | `timings` | per stage, seconds |
 | `cli_commit`, `lexicon_manifest_url`, `kit_commit` | the tool versions the run used |
 | `readiness_report` | `{overall, gates}` from the readiness validator run before the run |
@@ -443,5 +443,14 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
   tied to the deploy and the day (`stale_cursor`); `/v1/meta.deploy` gains `deploy_id`, `inputs_sha256`,
   `server_commit` and `duckdb_version`; `contractor_attribution_key` stable and versioned; `request_id` in every
   server error body; the manifest does not list itself. Contract frozen.
+- 2026-10-17, type corrections before the first `openapi.json` (approved by the operator; the metagross review of the CRM's
+  readiness found them): `PropertySummary.lat`, `lon` and `coordinate_basis` nullable, since about 68,000 properties have
+  no coordinates; `PropertySummary.geo_id` nullable; `roof_age_anchor` a key-distinguished union; `roof_age_caveats[]` an
+  open string list; `groups` a map; `atlas` fields strings; `gateway_checks[].gateway` a string. Typing rules for the
+  generated `openapi.json`: response objects stay open (no `additionalProperties: false`); fields added later are
+  optional; values that come from source data (printed statuses, source codes, caveat codes, gateway names, limitation
+  sources) are strings, and enums are used only for sets this contract closes (`status_group`, `roof_work_class`,
+  `outcome`, `match_type`, `kind`, `identity_status`, the evidence states, the availability types). Corrections of
+  defects like these are allowed until T7's first deploy, each dated here; after that the additive-only rule holds.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.
