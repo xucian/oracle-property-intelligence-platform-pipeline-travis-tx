@@ -248,3 +248,16 @@ m=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/publi
 - BBB: `kit docs/travis-bbb-access-request.md` (API access through developer.bbb.org).
 - Records requests for the 22 non-Austin jurisdictions: `kit docs/travis-sources.yaml`
   (`records_request` per row; the reusable body is in the kit's `request-routing.md`).
+
+## 5. T3 — the US-egress window (official identity baseline)
+
+The offline part of T3 is done (decisions.md section 23; `docs/progress.md`). With the VPN on, run the one line below. It
+asks `ipinfo.io/country` before every request and stops on anything but US (exit 3, nothing sent), writes a receipt per
+request under the gitignored `data/travis/t3-window/`, only downloads, and is resumable: after a stop or an
+`inconsistent` line, rerun the same line. Expect about 4 minutes (about 11 if data.texas.gov serves one page at a time;
+the statewide `9cir-efmm` file is 3.49 million rows in 70 pages, about 0.8 GB in all) and a last line
+`t3-vpn-fetch: 6/6 ok; …`; paste that line and the six `[source]` lines back.
+
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node src/counties/travis/t3-vpn-fetch.mjs
+```
