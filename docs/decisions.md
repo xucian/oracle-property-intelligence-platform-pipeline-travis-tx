@@ -1037,17 +1037,53 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
    dated contract correction before T7's first deploy, adding `out_of_county` to `unlinked_reasons`, plus a limitation
    "Austin permits on Williamson County parcels" with the count, and leaving them out of the Travis permit totals. The
    alternative is to keep them `invalid_quarantined` (T4's state), which overstates Travis's unlinked share by 4.4 points.
+   **Ruled (operator, 2026-10-18): approved.** Applied as `travis-parcel-link-v2` (kit `ad17d92`): the 103,869 permits are
+   `out_of_county`; `invalid_quarantined` keeps 178. Contract correction dated 2026-10-18 (`api-contract.md` change control);
+   the run record lists them under `limitations`.
 7. **The four required enums.** Recommended: publish `improvement_type` from the printed `permittype` code, one to one
    on every row (`BP` GeneralBuilding, `EP` Electrical, `MP` MechanicalHVAC, `PP` Plumbing, `DS` DrivewayPermit). Keep
    `improvement_status`, `improvement_action` and `contractor_type` null: `Expired`, `Active` and `Pending` have no
    faithful status member, `work_class` values such as `Addition and Remodel` or `Shell` have no one-to-one action, and no
    contractor type is printed. The alternative is all four null (T4's state). Either way T5 writes the choice once, and
    the first published CIDs carry it.
+   **Ruled (operator, 2026-10-18): approved, "but just double check"; then reconciled with the `mew` check and applied as
+   versioned exact-value tables (`travis-improvement-enums-v1`, permit transform v2, kit `d81e9a6`).** Verified against the
+   live schema (`property_improvement` `bafkreid5jnt3…`, whose cached bytes hash to the CID the live manifest
+   `7084b933…` names) and the full capture (evidence: kit `docs/evidence/travis-t4-ruling-7-enum-check-2026-10-18.json`).
+   A printed value is matched exactly; anything unlisted is null; all four properties are nullable, so a partial table is
+   the lexicon's convention.
+   - `improvement_type` from `permittype` (each code prints one `permit_type_desc`): BP `GeneralBuilding` 521,351, EP
+     `Electrical` 689,152, MP `MechanicalHVAC` 506,530, PP `Plumbing` 547,025, DS `RightOfWayPermit` 116,649; null 0%.
+     DS is `RightOfWayPermit`, not the `DrivewayPermit` recommended above: Austin Transportation and Public Works lists
+     "Driveway/Sidewalk (DS)" among its right-of-way permit types, for "any kind of driveway, sidewalk, curb, or gutter
+     work" (page captured with a receipt), and 2,452 DS rows are sidewalk, curb or gutter only.
+   - `improvement_status` from `status_current`: `Final` `Completed` 2,010,298; `Active` `Permitted` 27,902 (issued, every
+     row prints an issue date, with no evidence that work started, so never `InProgress`); `On Hold` `OnHold` 70; `Cancelled`
+     and the two `Cancelled - …` values `Cancelled` 810; null 14.35% (`Expired`, `VOID`, `Withdrawn`, `Aborted`, `Pending`
+     and the rest have no faithful member).
+   - `improvement_action` from `work_class`, building permits only: `New` 193,699, `Repair` 51,093, `Addition` 29,442,
+     `Remodel` and `Remodel Mobile Home` `Alteration` 187,701, `Demolition` `Remove` 21,449 (92.72% of BP rows); null for
+     `Addition and Remodel`, `Shell`, `Interior Demo Non-Structural`, `Life Safety`, `Relocation`, `Fireline`, blank and every
+     non-BP row (79.70% of all rows). A trade or driveway permit filed under a building permit carries its parent's work
+     class (EP 98.8%, MP 99.1%, PP 89.8%, DS 91.0% of those whose parent is in the capture), so on them the field names the
+     project. Caveat: the field is Austin's filing category, so the 23,290 permits the profile reads as re-roofs publish
+     `Alteration` 19,986, `Repair` 2,335, `Addition` 248, `New` 72, `Remove` 9 and null 640; the roofing signal stays the
+     profile's.
+   - `contractor_type` from `contractor_trade` (five printed values over all rows): `General Contractor`
+     `GeneralContractor` 565,111; `Electrical`, `Mechanical` and `Plumbing Contractor` `Specialist` 866,726; blank null
+     39.86%.
+   Corrections of this section's own statements: `contractor_trade` is printed and collected, so "no contractor type is
+   printed" was wrong; re-roofs are filed mostly `Remodel`, not `Repair`. No point of `mew`'s check is disputed. The README's
+   open and long-open permit questions (README.md 13, 105, 110) are answered from the printed `status_current` of the run
+   capture (`api-contract.md` lines 86-90, 404), not from `improvement_status`. Pilot and feasibility re-run under v2:
+   0 validation errors (runbook section 6 has the new roots).
 8. **Applicant fields.** The contract's `PermitDetail.applicant` ("as printed") contradicts the T1 privacy
    classification, under which applicant fields are not collected; the harvester follows the classification.
    Recommended: keep them uncollected and correct the contract before T7's first deploy, so that `applicant` is always
    null with the reason "not collected: personal contact fields". The alternative is to collect `applicant_org` only,
    after a privacy review.
+   **Ruled (operator, 2026-10-18): approved.** Contract correction dated 2026-10-18: `PermitDetail.applicant` is always
+   null, with `applicant_unavailable_reason: "not collected: personal contact fields"`.
 9. **Published scope, and the 48-hour gate.** Section 3 sets the `property_improvement` scope from the measured
    throughput. The source acquisition takes 0.09 hours, so the kit's per-source gate holds. The full run with every
    exactly linked permit of all five types (1,978,992 permits on 232,640 parcels) projects to 59.97 hours sequentially,
