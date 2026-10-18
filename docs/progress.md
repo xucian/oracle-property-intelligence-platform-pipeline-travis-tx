@@ -6,7 +6,7 @@ Versions (decisions.md section 15): v1 = T1â€“T2 plus the pilot upload; v2 = T3â
 Design: the four pre-implementation reviews are done and `docs/api-contract.md` v1 is frozen (commit `de08901`,
 decisions.md section 21); T7's first commit is the Zod contract package and the committed `openapi.json`.
 Stop-per-increment is in force again (decisions.md section 17): T1 is verified; T2 ran offline on the
-operator's go (2026-10-16) and is handed to the operator; T3 is verified (operator's approval 2026-10-17, after the runbook section 5 checklist); T4 is observed (2026-10-17: harvest, link proof, pilot and feasibility run by the agent; the hand-off checklist is runbook section 6; the five points of decisions.md section 25 were ruled on 2026-10-18 and are applied).
+operator's go (2026-10-16) and is handed to the operator; T3 is verified (operator's approval 2026-10-17, after the runbook section 5 checklist); T4 is verified (operator's approval 2026-10-18, after the runbook section 6 checklist; decisions.md section 25 ruled and applied); T5 is next.
 
 | ID | Increment | Depends on | Status | Run / request id | Checkpoint | Expected vs actual | Operator observation | Next step |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
