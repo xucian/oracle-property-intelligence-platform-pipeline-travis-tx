@@ -65,7 +65,7 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
 | Term | Definition |
 | --- | --- |
 | `property_id` | TCAD **Property ID** (`PROP_ID`) exactly as the roll prints it: a string, never normalized, leading zeros preserved (the roll and the GIS layer print an integer, so none are expected). It is the lexicon `parcel_identifier` and the kit's `request_identifier` for the parcel. |
-| `geo_id` | TCAD **Geographic ID** (`geo_id`, string, e.g. `0222210299`), kept exactly as printed. Austin permits carry it as `tcad_id`; **permits link to properties on `geo_id`**, never on `property_id`. The link compares the printed values exactly first. Comparing with every non-digit character removed is a fallback that is enabled only after the Travis permit profile has proven that normalization one-to-one over the roll (no two `geo_id` values collapse) and recorded its version. Every served permit states how its link was made (`property_link`). A permit with zero or several candidate parcels stays valid-unlinked in the Query DB, is never published or served, and is counted under `/v1/meta.unlinked_reasons`. |
+| `geo_id` | TCAD **Geographic ID** (`geo_id`, string, e.g. `0222210299`), kept exactly as printed. Austin permits carry it as `tcad_id`; **permits link to properties on `geo_id`**, never on `property_id`. The link compares the printed values exactly first. Comparing with every non-digit character removed is a fallback that is enabled only after the Travis permit profile has proven that normalization one-to-one over the roll (no two `geo_id` values collapse) and recorded its version. Every served permit states how its link was made (`property_link`). A permit with zero or several candidate parcels stays valid-unlinked in the Query DB, is never published or served, and is counted under `/v1/meta.unlinked_reasons`. A permit whose `tcad_id` is another county's parcel id (the Williamson CAD account form, `R` and six digits, or `WCAD`) is `out_of_county`: outside the Travis parcel population, left out of the Travis permit totals and listed under `limitations`. |
 | `permit_id` | Austin permit number as printed (the lexicon `permit_number`), e.g. `2026-102216 EP`. |
 | `contractor_attribution_key` | Pipeline-assigned grouping key: hash of the printed company name and phone. It groups permits that print the same values; it is **not** an identity, and phone never feeds identity. Every contractor object carries `identity_status: "source_name_attribution"`; `official_identity` is null until an official registry or licensing record matches, which v1 does not attempt. The key is stable across deploys for identical printed values; its recipe is versioned as `/v1/meta.attribution_key_version`, and changing the recipe is a v2 change. |
 | Business record | One row of an official business source, served as the source printed it from the deploy-time `business_records` table (decisions.md section 23): the Texas Comptroller's Active Franchise Taxpayers (`tx-comptroller-franchise-tax/9cir-efmm`, the official corporate-registry equivalent; the Secretary of State is the authority of record), the Comptroller's Active Sales Tax Permit Holders (`tx-comptroller-sales-tax/jrea-zgmq`, Travis outlets) and the SOS Veteran Owned Business file (`tx-sos-veteran-owned-business/2vfr-72e4`). The lexicon has no home for these rows, so they are never published or CID-backed: every row carries `unpublished_source` and `record_cid: null`. A business record is the official record of its own taxpayer; it is never the identity of a permit contractor or a roll owner. The Travis load is the rows whose county code is 227 (Travis); out-of-county rows are loaded only as some Travis contractor's or owner's matched candidate, with `scope: "out_of_county"`. |
@@ -129,7 +129,7 @@ server derives the exact box from the loaded parcels) is valid and returns `200`
   "evidence_states": {"completed_date": {"confirmed_present": 0, "unknown": 0, "invalid_quarantined": 0},
                       "status_current": {"confirmed_present": 0, "unknown": 0},
                       "tcad_id": {"confirmed_present": 0, "invalid_quarantined": 0}},
-  "unlinked_reasons": {"no_candidate": 0, "multiple_candidates": 0, "invalid_quarantined": 0},
+  "unlinked_reasons": {"no_candidate": 0, "multiple_candidates": 0, "invalid_quarantined": 0, "out_of_county": 0},
   "limitations": [{"source": "bbb.org", "availability": "unsupported", "source_access_status": "blocked", "incomplete_reason": "http_403_source_block",
                    "detail": "…", "evidence": "runs/…", "records_request": null}],
   "cli_commit": "…", "lexicon_manifest_url": "…", "kit_commit": "99c7bff",
@@ -417,7 +417,7 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
 | `match_snippet` | `{field: "description"\|"permit_class"\|"work_class", text}` | text-search results only; `text` is an as-printed substring of at most about 240 characters, built by the server |
 | `bm25_score` | number | text-search results only; depends on the query, higher is better, not a confidence |
 
-**PermitDetail** = PermitSummary + `property: PropertySummary|null` + `applicant` (as printed) + `valuations` (optional).
+**PermitDetail** = PermitSummary + `property: PropertySummary|null` + `applicant` (always `null`, with `applicant_unavailable_reason: "not collected: personal contact fields"`) + `valuations` (optional).
 
 **Contractor**
 
@@ -606,5 +606,11 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
   technician numbers are printed once as registered and once as certified under one type, so "number and type" would
   give two licenses one id); a blank subtype is the empty string, so every license has an id. The TSBPE and Austin
   right-of-way lists print one license type each and keep the license number alone. No field is added.
+- 2026-10-18, T4 rulings (decisions.md sections 25.6 and 25.8, approved by the operator; defect corrections allowed until T7's
+  first deploy): `unlinked_reasons` in `/v1/meta` and Run gains `out_of_county`, the permits whose `tcad_id` is a Williamson
+  CAD account (`R` and six digits, or `WCAD`); they leave the Travis permit totals and appear under `limitations`.
+  `PermitDetail.applicant` is always `null`, and the new `PermitDetail.applicant_unavailable_reason` says why: "not collected:
+  personal contact fields" (the T1 privacy classification; the harvester never requests the applicant columns). No other
+  field changes.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.
