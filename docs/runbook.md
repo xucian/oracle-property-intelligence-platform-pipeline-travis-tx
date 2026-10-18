@@ -293,7 +293,8 @@ mirror `oracle/travis/kit/…/runtime`: it holds the code only, with no `node_mo
 The harvest of record is the Austin export captured on 2026-10-17 (`v1792239863`, 270 partition requests, kit
 `docs/evidence/travis-t4-harvest-v1792239863.json`). Everything below reads that capture and the T1 seed. No VPN is needed:
 the only requests go to the public lexicon manifest and to data.austintexas.gov (steps 3 and 6), which answer from RO.
-Run record: kit `docs/evidence/travis-t4-run-2026-10-17.json`. Rulings and open points: decisions.md section 25.
+Run record: kit `docs/evidence/travis-t4-run-2026-10-17.json` (rebuilt after the rulings of 2026-10-18). Rulings and open
+points: decisions.md section 25 (6, 7 and 8 ruled and applied; 9 and 10 measured, open).
 `t4-permit-fetch.mjs` captures a newer version under its own `v<rowsUpdatedAt>`; it is not part of this checklist.
 
 ### Hand-off checklist (about 25 minutes)
@@ -305,21 +306,25 @@ records it in its `t4-run.json`); `total_s` and `elapsed_s` vary.
 ```bash
 cli=/Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli
 run="node --max-old-space-size=12288 src/counties/travis/t4-run.mjs"
+export ELEPHANT_SKIP_UPDATE_CHECK=1   # elephant-cli exits with "update required" if npm has a newer version than 1.58.1
 ```
 
 1. `node src/counties/travis/t4-permit-verify.mjs` → `t4-permit-verify: OK; 270 partitions, 274 receipts, 2,380,707 CSV
    rows, 1813.8 MB; v1792239863 (rowsUpdatedAt 2026-10-17T12:24:23.000Z)`.
 2. `node --max-old-space-size=12288 src/counties/travis/t4-permit-links.mjs` (about 1.5 minutes) →
-   `"rows":2380707,"linked":1978992,"link_method":{"exact":1978992,"normalized_digits":0},"unlinked_reasons":{"no_candidate":259419,"multiple_candidates":38249,"invalid_quarantined":104047},"linked_parcels":232640,"digits_fallback_enabled":true,"new_unmapped_statuses":[]`.
+   `"rows":2380707,"linked":1978992,"link_method":{"exact":1978992,"normalized_digits":0},"unlinked_reasons":{"no_candidate":259419,"multiple_candidates":38249,"invalid_quarantined":178,"out_of_county":103869},"linked_parcels":232640,"digits_fallback_enabled":true,"new_unmapped_statuses":[]`.
 3. Pilot, `__ALL__` (2 minutes; 27 Socrata requests):
    `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-pilot.csv --label pilot --cli $cli --cross-check-socrata`
    → `"appraisal":{"seedRows":25,"success":25,"permanentFailure":0,"retryableFailure":0}`,
    `"permit_states":{"done_zero_permits":20,"done":5},"permits_linked":145,"permits_published":145,"property_cid_check":true,"socrata_cross_check":"25/25 equal through 2026-10-16"`,
    then `county validate 25/25 (0 error rows), CAR 471 blocks root baguqeerahe3ecgiyigcgdg6gmxqsmc5ylzlucf4kb3n5xcqi5tvtiebpv2ta, checks pass, 23 tables root baguqeeram5hefoyihxelublnx3hzdmbdxg5gavyukspzevkwnii7b5zexipq`
-   (T2's roots) and `property_improvement validate 5/5 (0 error rows), CAR 322 blocks root baguqeeram7n2d2uqpotfmu3bgmjrplguzny22ldvlwjnv4sk5hpjwohr4njq, checks pass, 7 tables root baguqeera7qlc2qavbgfy75sbznosxmkxsknmab35prsr6q7tqf2qejmw6i3a`.
+   (T2's roots) and `property_improvement validate 5/5 (0 error rows), CAR 322 blocks root baguqeerasa73ykixrvnyom3geknlfumnnu2vbgjj5adsm2f5u3gld3wsjp2a, checks pass, 7 tables root baguqeerado6vje54w2ez4m4wyqkcd72skfedke3ngb7cz2hkpsdqvya6fz7q`.
    Inspect one parcel: `ls "$(ls -d data/travis/runs/*-t4-pilot | tail -1)/830704/permit-data"` lists 5 `property_improvement_*.json`, their
    relationships, the Property Improvement root `bafkreicyzy…json`, the Seed root and the copied property, address and parcel
-   files; `permit-source-payload.json` beside it holds the printed rows, the profile and the capture locator.
+   files; `permit-source-payload.json` beside it holds the printed rows, the profile and the capture locator. The five
+   records of permit `2013-084591` carry `improvement_type` GeneralBuilding, RightOfWayPermit, Electrical, MechanicalHVAC
+   and Plumbing (BP, DS, EP, MP, PP), `improvement_status` Completed, `improvement_action` New on the BP only, and
+   `contractor_type` GeneralContractor (BP, DS) or Specialist (the trades) (`travis-improvement-enums-v1`).
 4. Appraisal only, `__NONE__`: `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__NONE__ $run --seed data/seeds/travis-pilot.csv --label pilot-none --cli $cli`
    → `"permit_states":{"not_eligible":25}`, the same County line as step 3, and `property_improvement no parcel in this group`.
 5. Failure paths: `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-pilot.csv --label pilot-drill --cli $cli --fault-drill permanent:547839,retryable:830704`
@@ -332,12 +337,12 @@ run="node --max-old-space-size=12288 src/counties/travis/t4-run.mjs"
    `PROPERTY_FIRST_PERMIT_ELIGIBLE_USAGE_TYPES_TRAVIS=__ALL__ $run --seed data/seeds/travis-feasibility-1000.csv --label feasibility-1000 --cli $cli --cross-check-socrata`
    → `"appraisal":{"seedRows":1000,"success":1000,…}`, `"permit_states":{"done":530,"done_zero_permits":470},"permits_linked":4151,"permits_published":4151,"property_cid_check":true,"socrata_cross_check":"998/998 equal through 2026-10-16"`,
    `county validate 1000/1000 (0 error rows), CAR 20138 blocks root baguqeerajznciv64kds7dilxfyy5mg33klp4ap2wxfe2frrag7cwhb6gau4a, checks pass, 24 tables root baguqeerag4dmbm2gzcqhvlzetfng4je6v6oklp2ny45azubq4ewv45sizrba`
-   and `property_improvement validate 530/530 (0 error rows), CAR 11484 blocks root baguqeeraajeuzganwzd64fxgwhcga4lsig35omoofvggisxkkmzbw4grp6xq, checks pass, 7 tables root baguqeera4fgbfvmjr7azmjfshzcumwdwgylfqy5gczqeb3a3i6seo5zoe3dq`.
+   and `property_improvement validate 530/530 (0 error rows), CAR 11484 blocks root baguqeeraizia76sunno5d7gulfac7b4jfsq6wej7xwhook4rpmz2ee3xuk4q, checks pass, 7 tables root baguqeera3hyz3mzdfmvzdyxxu3eab563sctfuaycnuo4ywqkiz7ryzg7aveq`.
 7. Projection (about 2 minutes):
    `f=$(ls -d data/travis/runs/*-t4-feasibility-1000 | tail -1); for g in county property_improvement; do node src/counties/travis/t4-shard-bench.mjs --group-dir $f/validate/$g --shards 8 --cli $cli --out $f/shard-bench-$g-8.json; done; node src/counties/travis/t4-projection.mjs --feasibility $f --bench-county $f/shard-bench-county-8.json --bench-property_improvement $f/shard-bench-property_improvement-8.json`
-   → two `"all_passed":true` bench lines, then `"within_gate":false` for the sequential run (about 60 hours, `cli_county_validate` about 44
-   of them), `"sharded":{… "within_gate":true …}` (about 15 hours on 8 shards) and `"source_acquisition_h":0.089`. Hours depend on
-   the machine; the run of record measured 59.97 and 15.47.
+   → two `"all_passed":true` bench lines, then `"within_gate":false` for the sequential run (about 60 hours, `cli_county_validate` about 46
+   of them), `"sharded":{… "within_gate":true …}` and `"source_acquisition_h":0.089`. Hours depend on the machine's free memory: the
+   runs of record measured 62.41 sequential and 15.47 to 33.28 on 8 shards (kit `docs/evidence/travis-t4-point-9-measurements-2026-10-18.json`).
 8. `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`
    → exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
-9. In the runtime directory, `npx vitest run tests/travis-*` → `Test Files 26 passed (26)`, `Tests 191 passed (191)`.
+9. In the runtime directory, `npx vitest run tests/travis-*` → `Test Files 27 passed (27)`, `Tests 195 passed (195)`.

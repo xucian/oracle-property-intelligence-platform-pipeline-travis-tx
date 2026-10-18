@@ -1092,7 +1092,64 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
    types and runs the CLI per 5,000-property shard, up to 8 shards in flight per group. The group stays
    `supported_partial`: it covers Austin only, and 16.9% of the export's rows do not link. The alternative, building
    permits only (435,019), shortens the permit group's CLI stages but not the County validation, which dominates.
+   **Not ruled (operator, 2026-10-18): measured, not changed** (kit `docs/evidence/travis-t4-point-9-measurements-2026-10-18.json`).
+   - Benchmark of the CLI chain (validate, hash, CAR validate, export-tables) on the 1,000-parcel run, two passes each, peak
+     memory of the CLI processes together: County 8 shards 94.8 s and 204.6 s (7.7 and 6.1 GB), 10 shards 133.5 s and 173.7 s
+     (8.9 and 7.8 GB), 12 shards 158.7 s and 157.5 s (9.3 and 8.8 GB); Property Improvement (530 parcels) 8 shards 39.1 s and
+     45.2 s (4.1 and 4.0 GB), 10 shards 43.5 s and 46.7 s, 12 shards 46.1 s and 53.4 s (up to 5.9 GB). The night before, with
+     memory free, 8 shards took 85.2 s and 21.9 s. Projected full run: 18.99-33.28 h on 8 shards, 24.32-29.67 h on 10,
+     27.75-28.58 h on 12, 62.41 h sequential. The swap file was nearly full during the passes (14.4 of 15.4 GB, a virtualization
+     VM of about 4 GB resident): 8 shards is fastest when memory is free, 10 and 12 add processes on the two efficiency cores
+     and 1-2 GB without gaining time; every sharded variant stays inside 48 hours.
+   - Network of the T5 full run: the runner's one request is the lexicon manifest (`--manifest <file>` avoids it); the
+     Socrata cross-check is only the pilot flag `--cross-check-socrata`; no Socrata, TCAD or TNR request otherwise. Each
+     `elephant-cli` call also checks npm for a newer version and exits 1 if one exists (`ELEPHANT_SKIP_UPDATE_CHECK=1` turns
+     it off), validate and hash fetch the lexicon manifest again, and schemas come from `~/.elephant-cli/schema-cache` (IPFS
+     gateways only on a miss).
+   - Projected published size per run, from the 1,000-parcel run: County 3.57 GB of CARs and 1.02 GB of table parts, 4.25 GB
+     distinct, 8.49 GB as Filebase counts it; Property Improvement 4.33 and 0.39 GB, 4.51 GB distinct, 9.02 GB counted; together
+     about 8.8 GB distinct and 17.5 GB counted (the tables DAG links the archive, so archive and parts count twice; the formula
+     reproduces T2's 505,699 counted bytes). 74% of a permit record is its partition request, mostly the 60-column `$select`.
+   - Checkpointing for T5 (design): shards of at most 5,000 properties assigned from the sorted PROP_IDs; the per-parcel
+     stages are already resumable by fingerprint; each shard stage writes to a staging name and, on success, an atomic marker
+     with its input and output digests, so a resume skips matching markers and reruns only the stages in flight; the run
+     runs under `caffeinate -i`.
+   - Recommendation, unchanged in substance: 8 shards per group with memory headroom (close the VM and heavy apps for the run),
+     `ELEPHANT_SKIP_UPDATE_CHECK=1`, the manifest digest checked at start and end.
 10. **Retired `geo_id`s.** 196,400 permits print one of 6,260 ten-digit ids that no 2026 account prints (their share
     rises to 14.6% for the 2020s, which fits tracts subdivided after the permit). Recommended: keep them `no_candidate`
     and list the count under limitations. Attaching them would need a TCAD parcel-lineage source (splits and merges),
     and looking for one needs US egress; only worth a slot in a VPN window that is already planned.
+    **Investigated from RO on 2026-10-18 at the operator's request** (kit `docs/evidence/travis-t4-retired-geo-ids-2026-10-18.json`;
+    every capture with a receipt; public files only):
+    (a) TCAD. The 6,260 ids are on no 2026 account of any type (all 493,324 PROP.TXT records; 63 permits sit on mobile-home
+    ids). The export layout has no prior, parent or split field. The 2026 Certified Special Export (JSON, 3.55 GB, free,
+    answers from RO) has no prior geo_id either, but its `links` tie current accounts to 76,477 account ids that no longer
+    exist, its land comment report (206,939 comments) names splits and merges between account ids ("SPLIT OUT OF 787408"),
+    and its `permits[]` lists TCAD's own permits per account. The EARS "parent account" is an economic-unit grouping.
+    (b) TNR GIS does not answer from RO (connection timeout); whether it keeps historical parcel layers needs US egress.
+    (c) Austin publishes past parcel snapshots: Land Database 2021 and the Land Use Inventory of 2022 and 2026, each pairing a
+    10-digit parcel id with the account id of its day. They print 5,873 of the 6,260 ids, beside account ids 5,871 of which
+    are gone from the 2026 roll: the ids belong to retired accounts.
+    Lineage therefore exists between accounts, reached through those snapshots, but it ends in several current accounts, the
+    lots of a split: through TCAD `links`, 4,164 ids reach current accounts and 4,047 of them reach several; through land
+    comments, 230 ids, 221 of them one account (8,959 permits).
+    (d) Point-in-polygon of the permit's own coordinates against the 2026 TNR polygons: `query-db-loading-matching` allows
+    location or address evidence only as an explicit fallback with its method, version and confidence, so it would be a
+    separately labelled candidate method (and a `property_link.match_method` the contract does not list). It is 99.8%
+    precise on permits that already link exactly, but only 4,618 of the 162,389 retired-id permits with coordinates fall in
+    one polygon: 157,771 fall in none, where the layer has no polygon yet for the new lots and condominiums. TCAD's own
+    permit listing names one current account for 7,531 of them (97.4% agreement with exact links where both exist), and a
+    unique street line for 25,641 (99.07% precise on exact links). All methods together reach 35,713 of the 196,400 permits;
+    160,687 (81.8%) are reached by none.
+    (e) README impact if they stay unlinked: 23,250 roofing permits (11.3% of all roofing permits), 700 open (15.9% of open
+    roofing permits) and 849 stalled roofing permits are loaded internally and counted under `limitations` but shown on no
+    property (README.md 13, 105, 110). Roof age loses at most the medium or high anchor of 3,070 parcels that have none from
+    an exact link and whose permit TCAD lists (their age falls back to the built year, low confidence); all methods together
+    would reach 6,881 roofing, 155 open and 222 stalled roofing permits.
+    **Recommendation:** keep `no_candidate` with the limitation and its counts for T5; the proof above shows that no public
+    source attributes most of these permits to one current parcel, and the reachable share of open roofing permits is 155
+    of 700. If the operator wants the rest of what is reachable, the one fallback backed by an official source is TCAD's own
+    permit listing (`match_method: tcad_permit_listing`, its own version and a `candidate` confidence, a dated contract
+    correction): 7,531 permits, 4,024 roofing, 21 open roofing. Street line and point-in-polygon stay out (address-grade
+    evidence for 99% precise but small gains). The TNR history question waits for a VPN window that is planned anyway.
