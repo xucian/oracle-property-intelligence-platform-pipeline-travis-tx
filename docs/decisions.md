@@ -1326,3 +1326,11 @@ it with the one command of runbook section 7. Evidence: kit `docs/evidence/travi
      type (no one-to-one property form or building count).
    Recommended: approve as applied. A `mew` check of the tables against the live schemas, as for 25.7, costs minutes and
    is best done before the start; nothing else waits for it.
+
+   **Ruled 2026-10-18 (operator, "go with the fix"), after mew's read-only check against the live manifest
+   (`7084b933…`; structure, lot, tax, County and relationship schemas re-hashed against their CIDs):** every applied
+   value confirmed; `FLOATING S` → `foundation_type` "Slab on Grade" (5 accounts; a floating slab is a slab on grade),
+   mapping `travis-tcad-extras-mapping-v2` (kit commit after `5225bcc`). Not taken: `BARN` → "Gambrel" (194 accounts),
+   an inference the printed code does not make, by the standard that keeps `COMPOSITIO` off the covering members.
+   Several structures per property stay out of v1: the lexicon reaches them only through building layouts
+   (`property_has_layout` → `layout_has_structure`), not a pre-run fix.
