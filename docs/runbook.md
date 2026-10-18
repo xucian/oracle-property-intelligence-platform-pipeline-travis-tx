@@ -370,7 +370,7 @@ validate, export-tables) and the Loader's merge. Every stage writes an atomic `<
 digests, so an interruption redoes only the shards in flight. The runner holds `caffeinate -dimsu -w <its pid>`, sets
 `ELEPHANT_SKIP_UPDATE_CHECK=1` and writes `run.json` (the `runs/<run_id>.json` record) at the end. Nothing is uploaded,
 pinned or registered (T6). Measured on the dry run: about 14.5 hours on this machine with swap at 5.5 of 7 GB, about
-125 GB on disk, a peak of about 8 GB for the 8 `elephant-cli` processes and the runner together (kit
+125 GB on disk, a peak of about 9 GB for the 8 `elephant-cli` processes and the runner together (kit
 `docs/evidence/travis-t5-dry-run-2026-10-18.json`).
 
 ### Preflight (about 5 minutes)

@@ -1296,8 +1296,11 @@ it with the one command of runbook section 7. Evidence: kit `docs/evidence/travi
 7. **Projection** (swap at 5.5 of 7 GB throughout, as during the T4 passes): 14.48 hours from the dry run's own stage
    times, 14.46 hours by T4's method on the v4 feasibility sample (59.13 hours sequential); both within the 48-hour gate.
    About 125 GB of disk (231 GB free). Memory: the runner alone peaks at 6.1 GB during the link pass, before any CLI
-   process; in the shard pool the runner holds under 1 GB and 8 CLI processes took 7.3 GB at 250-property shards (one
-   process: 0.91 GB at 250 properties, 0.98 GB at 1,000).
+   process; in the shard pool the runner holds under 1 GB, and one `elephant-cli` process grows only slowly with its shard
+   (0.91 GB at 250 properties, 0.98 GB at 1,000, 1.05 GB at 5,000, measured on one full-size County shard of the dry run's
+   parcels in one process: 31.6 minutes, 112,446 blocks, every check 0), so 8 full-size shards in flight peak at about 9
+   GB with the runner. Kit `docs/evidence/travis-t5-dry-run-2026-10-18.json` holds the runs, the comparison and the
+   benches.
 
 **Open for the operator:**
 
