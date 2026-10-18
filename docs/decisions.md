@@ -1092,7 +1092,7 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
    types and runs the CLI per 5,000-property shard, up to 8 shards in flight per group. The group stays
    `supported_partial`: it covers Austin only, and 16.9% of the export's rows do not link. The alternative, building
    permits only (435,019), shortens the permit group's CLI stages but not the County validation, which dominates.
-   **Not ruled (operator, 2026-10-18): measured, not changed** (kit `docs/evidence/travis-t4-point-9-measurements-2026-10-18.json`).
+   **Measured at the operator's request (2026-10-18), before the ruling below** (kit `docs/evidence/travis-t4-point-9-measurements-2026-10-18.json`).
    - Benchmark of the CLI chain (validate, hash, CAR validate, export-tables) on the 1,000-parcel run, two passes each, peak
      memory of the CLI processes together: County 8 shards 94.8 s and 204.6 s (7.7 and 6.1 GB), 10 shards 133.5 s and 173.7 s
      (8.9 and 7.8 GB), 12 shards 158.7 s and 157.5 s (9.3 and 8.8 GB); Property Improvement (530 parcels) 8 shards 39.1 s and
@@ -1116,6 +1116,24 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
      runs under `caffeinate -i`.
    - Recommendation, unchanged in substance: 8 shards per group with memory headroom (close the VM and heavy apps for the run),
      `ELEPHANT_SKIP_UPDATE_CHECK=1`, the manifest digest checked at start and end.
+   **Ruled (operator, 2026-10-18): approved.** T5 publishes all five Austin permit types, every linked permit (the count
+   after point 10's ruling is recorded there). The CLI chain runs per shard of at most 5,000 properties, 8 shards in
+   flight per group: the fastest setting measured when memory is free. Design notes for T5 (recorded here, not built in
+   T4):
+   - **Done-markers.** Each shard stage (validate, hash, CAR validate, export-tables) writes to a staging name; only after
+     the CLI exits 0 and its output parses is the output renamed and `shards/<id>/<stage>.done.json` written atomically,
+     with the input digest (sorted per-parcel file digests, lexicon manifest SHA-256, CLI version) and the output digests
+     (CAR SHA-256, roots). A resume skips every stage whose marker matches the recomputed input digest and reruns the rest,
+     so a crash or a sleep redoes only the shards in flight. Shards are assigned from the sorted PROP_IDs, so a rerun
+     builds the same shards.
+   - **Update check off.** The run exports `ELEPHANT_SKIP_UPDATE_CHECK=1`: otherwise an npm release during the run makes
+     every later `elephant-cli` call exit 1 with "update required". The CLI stays pinned at 1.58.1 (`44bb182`), and the
+     lexicon manifest SHA-256 is recorded at the start and the end; a change stops the run.
+   - **Memory first.** During the measurements the Colima/Docker VM held about 4 GB and the swap file was nearly full
+     (14.4 of 15.4 GB), which doubled the 8-shard County time (94.8 s, then 204.6 s, against 85.2 s with memory free). Before
+     the start: stop the VM, close heavy apps, and check `sysctl vm.swapusage`.
+   - **No sleep.** The run runs under `caffeinate -i`; a lid-close or a forced sleep counts as a crash and resumes from the
+     markers.
 10. **Retired `geo_id`s.** 196,400 permits print one of 6,260 ten-digit ids that no 2026 account prints (their share
     rises to 14.6% for the 2020s, which fits tracts subdivided after the permit). Recommended: keep them `no_candidate`
     and list the count under limitations. Attaching them would need a TCAD parcel-lineage source (splits and merges),
