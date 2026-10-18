@@ -1171,3 +1171,52 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
     permit listing (`match_method: tcad_permit_listing`, its own version and a `candidate` confidence, a dated contract
     correction): 7,531 permits, 4,024 roofing, 21 open roofing. Street line and point-in-polygon stay out (address-grade
     evidence for 99% precise but small gains). The TNR history question waits for a VPN window that is planned anyway.
+    **Ruled (operator, 2026-10-18): option B approved, for roofing coverage.** Retired `geo_id`s stay `no_candidate` by
+    default; one new, separately labelled method links through TCAD's own permit listing; the unique-street-address and
+    coordinate methods are not added. Applied as `travis-parcel-link-v3` (kit `6025f17`, `00bea93`; evidence kit
+    `docs/evidence/travis-t4-ruling-10-tcad-listing-2026-10-18.json` and the link proof `travis-t4-link-proof-v1792239863.json`):
+    - **Source.** The 2026 Certified Special Export (JSON) already on disk from the study above, checked against its receipt
+      (3,554,021,795 bytes, SHA-256 `6f7a7585…`) before it is read. Nothing was re-fetched, so no request went to
+      traviscad.org. `t4-tcad-permit-listing.mjs` turns its `permits[]` into a permit-number index (493,246 accounts; 781,459
+      permit numbers on 1,121,918 permit-account pairs; listing SHA-256 `7b2bf8e6…`), which the link pass rechecks before use.
+    - **Precedence.** Exact `geo_id`, then the digits-only comparison, then the listing. The listing is read only for a
+      ten-digit `tcad_id` that no current account prints, and it links only when it records the permit number on exactly one
+      current (seed) account. Blank, shared, quarantined and out-of-county ids never read it. A listing on several current
+      accounts, only on accounts outside the roll, or no listing at all leaves the permit `no_candidate`: the printed id still
+      names no current parcel.
+    - **Label.** `match_method: tcad_permit_listing`, `confidence: official_listing`, with the listing version
+      (`travis-tcad-permit-listing-v1`) and the source digest on every link. TCAD's listed entries go to the permit sidecar.
+    - **A link, not a candidate,** under `query-db-loading-matching` (permit/property matching 1-6). Exact source identity
+      comes first and keeps precedence (rules 1-2). The listing is an explicit fallback (rule 3): it joins two printed
+      identifiers (Austin's permit number and TCAD's account id) from the authority that issues the accounts. That evidence
+      is stronger in kind than the address evidence the rule already admits as a fallback, and it applies only after the
+      `geo_id` paths find no candidate. Unresolved permits keep null links (rule 4). Rule 5 asks to reconcile a related
+      parcel to the target. Here the target is retired, so it is reconciled by measurement. On the 222,931 exactly linked
+      permits that TCAD lists on one current account, the listing names the same account 97.30% of the time (98.33% where
+      TCAD's own permit record names the printed id, 92.73% where it does not; roofing 97.19%). Per record, TCAD's record
+      names the retired id the permit prints for 4,468 of the 7,531 links. Method, version, confidence and source hash are
+      recorded (rule 6). In the skill a candidate is unaccepted evidence that is never linked, published or used for roof
+      age. This evidence is accepted, so the method links. Correction of the recommendation above: it proposed a `candidate`
+      confidence. Under these rules that word would mean "not linked", so the label is `official_listing`.
+    - **Counts over the full capture (before → after).** Linked 1,978,992 → 1,986,523 (83.13% → 83.44%) on 232,640 → 237,533
+      parcels. Recovered: 7,531 permits (BP 6,808, EP 523, PP 184, MP 15, DS 1) on 5,034 parcels, 4,893 of which had no
+      link before; among them 4,024 roofing, 21 open and 142 stalled roofing permits, and 3,658 roof-age anchors. Still
+      `no_candidate`: 251,888 (was 259,419): 63,019 with a blank `tcad_id`, plus 188,869 on retired ids (463 listed on several
+      current accounts, 26 only on accounts outside the roll, 188,380 not listed). Unchanged: exact, `multiple_candidates`
+      38,249, `invalid_quarantined` 178, `out_of_county` 103,869 and every profile count. The study's figures are reproduced.
+    - **README impact now** (README.md 13, 36, 105, 110; the study evidence cites roof age as line 33, which is line 36):
+      - Roofing permits shown on no property: 39,481 → 35,457 (on retired ids 23,250 → 19,226). Open roofing: 801 → 780
+        (700 → 679). Stalled roofing: 1,222 → 1,080 (849 → 707).
+      - Parcels with a permit roof-age anchor: 105,663 → 108,733. The 3,070 parcels whose anchor permit TCAD lists no longer
+        fall back to the built year. 333,228 of 441,961 parcels have no permit anchor (built year, low confidence, or no age).
+      - 15,395 anchor-eligible permits stay unlinked, on parcels no public source names; at most that many parcels fall back
+        because of them.
+      - Anchor-eligible means a completed primary roof (replacement or new construction) with a confirmed completion date,
+        read with the profile's date evidence. This is why it counts 19,053 retired-id anchors where the study counted 19,057.
+    - **Contract.** A dated correction (2026-10-18, `api-contract.md` change control) adds the new `match_method` value and
+      its confidence. A roof-age anchor from such a permit adds the caveat `anchor_link_tcad_permit_listing` (T5's estimator
+      input carries the link method). The Run's `sources[]` lists the special export. No other field changes.
+    - **Runs.** Pilot, `__NONE__`, drill and feasibility were re-run at kit `8455bb5` with 0 validation errors. County roots
+      are unchanged; the Property Improvement roots are new (runbook section 6). The pilot gains parcel 748284 (10 permits on
+      the retired id `0108032001`); the feasibility sample gains 12 parcels and 22 permits. With 25.9, T5 publishes every
+      linked permit, 1,986,523.
