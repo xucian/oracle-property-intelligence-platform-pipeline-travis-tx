@@ -357,3 +357,69 @@ export ELEPHANT_SKIP_UPDATE_CHECK=1   # elephant-cli exits with "update required
 9. `cd /Users/luti/dev/ateam/role1-prism/kit-travis && python3 skills/use-oracle/scripts/validate-county-readiness.py skills/use-oracle/runtime/docs/travis-sources.yaml`
    → exit 0, `"overall": "PASS"`, `"seed_allowed": true`.
 10. In the runtime directory, `npx vitest run tests/travis-*` → `Test Files 28 passed (28)`, `Tests 201 passed (201)`.
+
+## 7. T5 — full run, reconciliation and signals
+
+The design is decisions.md section 25.9 (approved 2026-10-18); what phase A built and measured is section 26. One command
+runs the whole roll (441,961 accounts) through every stage, offline except for the public lexicon manifest: the readiness
+validator (the run stops unless `PASS`), the manifest (its SHA-256 is recorded and checked again on every resume and at
+the end; a change stops the run), the shard plan (89 shards of at most 5,000 sorted PROP_IDs), one link pass over the
+2,380,707 captured permits, then up to 8 shards in flight, each through the appraisal transform (v4), the permit transform,
+roof age and the internal query table, the County and the Property Improvement `elephant-cli` chains (validate, hash, CAR
+validate, export-tables) and the Loader's merge. Every stage writes an atomic `<stage>.done.json` with its input and output
+digests, so an interruption redoes only the shards in flight. The runner holds `caffeinate -dimsu -w <its pid>`, sets
+`ELEPHANT_SKIP_UPDATE_CHECK=1` and writes `run.json` (the `runs/<run_id>.json` record) at the end. Nothing is uploaded,
+pinned or registered (T6). Measured on the dry run: about 14.5 hours on this machine with swap at 5.5 of 7 GB, about
+125 GB on disk, a peak of about 8 GB for the 8 `elephant-cli` processes and the runner together (kit
+`docs/evidence/travis-t5-dry-run-2026-10-18.json`).
+
+### Preflight (about 5 minutes)
+
+1. `colima stop` (or quit Docker Desktop), then quit heavy apps (browsers with many tabs, other IDEs). Keep the Mac on AC
+   power with the lid open: `caffeinate` prevents idle and system sleep on AC; on battery a lid close still sleeps (that
+   counts as an interruption, see below).
+2. `sysctl vm.swapusage` → `used` well under half of `total`. The run warns above half or 4 GB, and a nearly full swap
+   doubled the County time in T4 (decisions.md 25.9). If `used` stays high after quitting apps, restart the Mac.
+3. `df -h /Users/luti` → at least 160 GB available (the run writes about 125 GB).
+
+The run repeats these checks at its start as warnings (`[t5] preflight warning: …`) and starts anyway.
+
+### Start: the one command
+
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full
+```
+
+It prints `[t5] starting data/travis/runs/<timestamp>-t5-full (attempt 1, pid <n>); no-sleep caffeinate -dimsu -w <n>;
+ELEPHANT_SKIP_UPDATE_CHECK=1; loader scope full`, then about 3 minutes of global stages (the runner alone uses up to about
+6 GB during the link pass), then the shard pool. Leave the terminal open.
+
+### Watch
+
+- The terminal prints one line a minute and one per finished shard, for example
+  `[t5 2026-10-19T02:10:04Z] shards | shards 23/89 done, 8 in flight (s0024 county.validate, …) | parcels 115000/441961 | elapsed 3h48m | ETA 10h41m (about 12:51 local) | elephant-cli 8 procs 7.4 GB, runner 0.4 GB, swap 1.2 GB`.
+- From another terminal: `cat "$(ls -d data/travis/runs/*-t5-full | tail -1)/progress.txt"` (the same line), or
+  `tail -f "$(ls -d data/travis/runs/*-t5-full | tail -1)/progress.jsonl"`.
+- A shard that fails is logged as `[t5] s00NN failed: …` and in `failures.jsonl` of the run directory; the other shards go
+  on.
+
+### Interrupted (Ctrl-C, a crash, `kill`, a sleep, a reboot)
+
+Run the same start command again. It finds the unfinished `full` run and prints `[t5] resuming
+data/travis/runs/<timestamp>-t5-full (attempt 2, …)`; it stops any `elephant-cli` process a killed runner left behind,
+checks the lexicon manifest against the one recorded at the start, skips every stage whose done-marker still matches and
+reruns only what was in flight. The ETA counts only the shards that still run. A run that ends with `[t5] N shard(s)
+failed (…)` is resumed the same way, after fixing the cause named in `failures.jsonl` (for example disk space). Do not add
+`--new`: that starts the run over in a new directory.
+
+### What "done" prints
+
+```
+{"travis_t5_run":"<timestamp>-t5-full","status":"finished","seed":441961,"ready":441936,"dead":25,"invalid":0,"reconciles":true,"shards":89,"cars":356,"permits_published":1986484,"roof_age_eligible":…,"wall_h":…,"run_record":"data/travis/runs/<timestamp>-t5-full/run.json"}
+[t5] done: data/travis/runs/<timestamp>-t5-full/run.json
+```
+
+The 25 dead accounts are the roll rows without a situs street (T2); 39 linked permits sit on 2 of them and stay internal.
+`invalid` other than 0 means `elephant-cli validate` rejected some properties: they are left out of the archives,
+tombstoned as invalid and listed in `run.json`. The post-run checklist (reconciliation, counts per table, the run record
+in this repository's `runs/`) is written in phase B, after the run.

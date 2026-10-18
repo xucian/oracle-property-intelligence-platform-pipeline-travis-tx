@@ -1220,3 +1220,106 @@ country) and the lexicon manifest. No TCAD, TNR or `*.texas.gov` request was nee
       are unchanged; the Property Improvement roots are new (runbook section 6). The pilot gains parcel 748284 (10 permits on
       the retired id `0108032001`); the feasibility sample gains 12 parcels and 22 permits. With 25.9, T5 publishes every
       linked permit, 1,986,523.
+
+## 26. 2026-10-18: T5 phase A — the pre-run fixes, the sharded runner, and one point open before the full run
+
+T5 phase A ran on the operator's go of 2026-10-18 (T4 approved): the pre-run fixes oracle recorded in the T5 row of
+`docs/progress.md` on 2026-10-17, the full-run runner of the design approved in 25.9, the Loader, roof age, the run record
+and a dry run with a resume proof. The full run itself has not started: the operator frees the machine's memory and starts
+it with the one command of runbook section 7. Evidence: kit `docs/evidence/travis-t5-field-coverage-2026-10-18.json`,
+`travis-t5-prefix-reruns-2026-10-18.json`, `travis-t5-dry-run-2026-10-18.json`.
+
+**Applied by the agent, for the operator's review at the T5 checkpoint:**
+
+1. **Transform v4 (the pre-run fixes).**
+   - *One geometry per part.* A multi-part parcel keeps its point in `geometry.json` (the address's geometry, as before)
+     and gets one `geometry_part_<n>.json` per polygon part with its outer ring, each linked by `parcel_has_geometry` (an
+     array in the County schema): 616 parcels, 1,593 parts, all written; v3 wrote no polygon for them. A single-part parcel
+     is unchanged byte for byte.
+   - *Inner rings.* `geometry.polygon` holds one ring, so the holes of 284 parcels (605 rings, 135,508 vertices) are not
+     written; each parcel's sidecar counts them (`geometry.inner_rings_dropped`) and the coverage record lists the gap.
+   - *The TCAD fields with a lexicon home that T2 left unread*, read in one offline pass over the receipted 2026 export (58
+     seconds; `t5-tcad-extras.mjs`, the seed builder's first-record rule): `structure` from `IMP_ATR.TXT` on 324,617
+     accounts (roof material Composition 276,217, Metal 21,644, Tile 13,155, Wood 1,360; roof covering Built-Up Roof 7,443
+     and Wood Shingle 1,360; roof design Hip 183,379, Gable 126,865, Flat 8,706, Mansard 615; foundation Slab on Grade
+     296,134, Pier and Beam 24,374); `lot` from `LAND_DET.TXT` for 72,997 of the 73,334 accounts the roll prints without
+     legal acreage; `tax.homestead_cap_loss_amount` from `ten_percent_cap` on 34,774 accounts; and the county, hospital
+     district, college district, school and city taxable values of `PROP_ENT.TXT` (441,957, 441,954, 335,804, 441,219 and
+     330,389 accounts). The rules are in point 26.8. The TNR feature is inventoried in the coverage record: 386,682
+     features carrying `OBJECTID`, `PROP_ID` and `geo_id` (the three fields T1 requested), 697 of them MultiPolygons,
+     13,130 without a PROP_ID, the layer's `geo_id` equal to the roll's on all 373,541 joined features.
+   - *Roots.* County roots change, Property Improvement roots do not (the permit group copies property, address and
+     parcel, which v4 keeps). Pilot: County CAR 493 blocks (was 471), root
+     `baguqeerairotuzbwrkd5cxddtqv32u5ki6fqfhudsg2bmuddsf37xjp6yk3a`, 25 tables, root
+     `baguqeeragnjfmjgtmcot5njwwgc7jbbhrlgi5lhsxmsfowj4t75agb6eif7q`. Feasibility: County CAR 21,938 blocks (was 20,138),
+     root `baguqeera4fyfdfxvehuiqejspt2wxqive336mfuvnvbbn6h5bii4ps2sixaa`, 26 tables, root
+     `baguqeera62zm5wsicpdl4tbyzkmwgb7qoba2cyt62bbxuyulbfiot442e3ua`. 0 validation errors on both; runbook section 6's
+     County roots are T4's and no longer reproduce under v4.
+2. **The runner (`t5-run.mjs`, the 25.9 design).** Shards of at most 5,000 sorted PROP_IDs (89 for the roll), one
+   partition for both groups: a shard's Property Improvement group is the permit parcels of its County shard, so it holds
+   at most 5,000 properties by construction (89 County and 89 Property Improvement archives, about 2,700 properties each on
+   the permit side). Up to 8 shards in flight; each runs its County chain, then its Property Improvement chain, so at most 8
+   `elephant-cli` processes run at once (the measured setting). Every stage writes to an attempt-numbered location and an
+   atomic done-marker with its input digest (the files it read, the lexicon manifest SHA-256, the CLI version, the digest of
+   the code it ran) and its output digests; a resume reruns only a stage whose marker is missing or no longer matches. The
+   same start command resumes an unfinished run of its label. A property `elephant-cli validate` rejects is left out of the
+   archives and tombstoned as invalid (none so far). The link pass streams every permit to one file per shard and to the
+   internal permits table instead of holding them in memory.
+3. **Loader, roof age, run record.** The internal store is file-based (`travis-sources.yaml` `destination.mode`): per-shard
+   merge records behind a ready-hash gate, then an atomic finalize (a new generation and a `CURRENT` pointer) with
+   content-aware watermarks per track and prefix, deltas against the generation in force, and dead, invalid and absent-key
+   tombstones; the internal permits table holds every captured permit, linked or not. Roof age runs the kit's estimator per
+   parcel with the Travis profile over the parcel's published linked permits and its published built year; a parcel with a
+   linked permit has `partial` history, one without has `unknown` history; an anchor linked through TCAD's listing carries
+   `anchor_link_tcad_permit_listing`. The run record has the contract's Run shape (`seed = ready + dead + invalid` checked,
+   counts per table from the CLI's own exports, deltas, tombstones, evidence states, limitations, every CAR, timings, peak
+   memory, tool versions, run history); `groups`, `manifest_cid`, `gateway_checks` and `atlas` stay empty until T6.
+4. **Contract.** A dated correction: `evidence_states.tcad_id` gains `unknown` (63,019 blank ids), so the three states sum
+   to the permit rows.
+
+**Measured (dry run and projection):**
+
+5. **Dry run.** Real seed rows (the first 5,000 PROP_IDs), cut into 20 shards of 250 so that 8 run in flight and each slot
+   runs 2–3 shards, with the real CLI, the live manifest, the whole permit capture and TCAD's listing: 14 min 42 s; 5,000 =
+   5,000 ready + 0 dead + 0 invalid; 80 CARs (archive and tables per group and shard), every CAR check 0; 55,539 permits
+   published on 3,895 parcels; roof age for 4,625 parcels (435 completed replacement, 1,187 new construction, 3,003 built
+   year; 3,733 older than 15 years), 375 without one; the internal permits table 2,380,707 rows; manifest `7084b933…` at
+   start and end; `caffeinate` held.
+6. **Resume proof.** The same dry run twice more, killed mid-shard and resumed by the same command. SIGTERM at 8 of 20
+   shards: the runner stopped its two `elephant-cli` processes and exited 143 within 6 seconds; the resume reran the 3
+   stages in flight. SIGKILL at 6 of 20: exit 137, the two CLI processes ended with their pipes; the resume reran the 8
+   stages in flight (two queued Loader merges, three County validations, two permit transforms, one appraisal). In both,
+   every stage a finished shard had kept its first marker, and all 261 compared stage outputs equal the uninterrupted run's
+   (CAR SHA-256s and roots, tables, the validate and CAR-check CSVs, roof age, the query table, the per-parcel artifact
+   digests, the link files). The CLI's per-property ZIPs under `hashed/` carry file times and differ byte for byte; the CAR
+   that holds their blocks is identical.
+7. **Projection** (swap at 5.5 of 7 GB throughout, as during the T4 passes): 14.48 hours from the dry run's own stage
+   times, 14.46 hours by T4's method on the v4 feasibility sample (59.13 hours sequential); both within the 48-hour gate.
+   About 125 GB of disk (231 GB free). Memory: the runner alone peaks at 6.1 GB during the link pass, before any CLI
+   process; in the shard pool the runner holds under 1 GB and 8 CLI processes took 7.3 GB at 250-property shards (one
+   process: 0.91 GB at 250 properties, 0.98 GB at 1,000).
+
+**Open for the operator:**
+
+8. **The exact-value tables of transform v4.** Like 25.7's enums, they go into the first published County CIDs, and
+   changing one after the full run means rerunning the County chain of every shard (about 10 of the 14.5 hours). Applied:
+   - `IMP_ATR` "Roof Covering" (printed codes, cut at 10 characters): `BUILT-UP` → `roof_covering_material` "Built-Up
+     Roof"; `WOOD SHING` → "Wood Shingle" and `roof_material_type` "Wood"; `COMPOSITIO`, `METAL` and `TILE` →
+     `roof_material_type` "Composition", "Metal", "Tile" only, because each names a material and not one of the covering
+     members (3-tab or architectural shingle, standing seam or corrugated, clay or concrete tile); `OTHER` → nothing.
+     "Roof Style": `FLAT`, `GABLE`, `HIP`, `MANSARD` → `roof_design_type`; `A-FRAME`, `BARN`, `OTHER` → null. "Foundation":
+     `SLAB` → "Slab on Grade", `PIER AND B` → "Pier and Beam"; `BLOCKS`, `FLOATING S`, `WOOD POST`, `OTHER` → null.
+   - One structure per property (`property_has_structure` is single-valued): a field is written only when the account
+     prints one code for its attribute over all its improvements; 2,460 accounts print several roof coverings, 3,472
+     several roof styles and 2,625 several foundations, and those fields stay null. `roof_age_years` and `roof_date` are
+     never written (section 5).
+   - `lot` from the land segments only where the roll prints no legal acreage: the summed square feet, and the acres only
+     when they agree within 1% (409 accounts keep square feet only).
+   - `tax`: `homestead_cap_loss_amount` when `ten_percent_cap` is positive (like the agricultural value); per class (county
+     = TRAVIS COUNTY, hospital = TRAVIS COUNTY HEALTHCARE DISTRICT, college = AUSTIN COMM COLL DIST, school = a name ending
+     in ISD, city = CITY OF or VILLAGE OF), the taxable value of the one entity of that class on the account; 738 accounts
+     in two school districts and 26 in two cities leave that field out. Special districts (an account sits in several),
+     per-entity exemptions and an account-wide taxable value (not printed) are not written, nor is `IMP_INFO`'s improvement
+     type (no one-to-one property form or building count).
+   Recommended: approve as applied. A `mew` check of the tables against the live schemas, as for 25.7, costs minutes and
+   is best done before the start; nothing else waits for it.
