@@ -128,7 +128,7 @@ server derives the exact box from the loaded parcels) is valid and returns `200`
   "atlas": null,
   "evidence_states": {"completed_date": {"confirmed_present": 0, "unknown": 0, "invalid_quarantined": 0},
                       "status_current": {"confirmed_present": 0, "unknown": 0},
-                      "tcad_id": {"confirmed_present": 0, "invalid_quarantined": 0}},
+                      "tcad_id": {"confirmed_present": 0, "unknown": 0, "invalid_quarantined": 0}},
   "unlinked_reasons": {"no_candidate": 0, "multiple_candidates": 0, "invalid_quarantined": 0, "out_of_county": 0},
   "limitations": [{"source": "bbb.org", "availability": "unsupported", "source_access_status": "blocked", "incomplete_reason": "http_403_source_block",
                    "detail": "…", "evidence": "runs/…", "records_request": null}],
@@ -621,5 +621,8 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
   as printed; a roof-age anchor taken from such a permit adds the caveat `anchor_link_tcad_permit_listing`; the Run's
   `sources[]` gains an entry for the special export. The `geo_id` definition and the `property_link` row say so. No other
   field changes.
+- 2026-10-18, T5 preparation (a defect correction allowed until T7's first deploy): `evidence_states.tcad_id` in `/v1/meta`
+  and Run gains `unknown`, the permits that print a blank `tcad_id` (63,019 in the T4 capture), so the field's three states
+  sum to the permit rows as the other two fields' states do; the link pass has counted them since T4. No other field changes.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.
