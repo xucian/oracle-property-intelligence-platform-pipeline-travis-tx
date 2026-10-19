@@ -511,29 +511,49 @@ decisions.md section 27 explains attempt 1's deviations and rules on them; point
 
 </details>
 
-## 8. T6 — publication, run 1 (uploaded; gateway checks stopped on Pinata's quota)
+## 8. T6 — publication, run 1
 
-Ruled 2026-10-19/20 (decisions.md 28.6-28.7; the operator's goes D, a, i and γ): the 177 shard archives as they are,
-no Atlas PR; gateways `https://gateway.pinata.cloud` and `https://ipfs.filebase.io`. All 354 roots are uploaded with
-readback, Filebase pins every CID, and the gateway checks stopped on Pinata's hourly `429` (decisions.md 28.7). These
-checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (10).
+Observed 2026-10-19 (decisions.md 28.6-28.7; the operator's goes D, a, i, γ and 3): the 177 shard archives as they are,
+no Atlas PR. Every root is uploaded with readback, Filebase pins every CID, every manifest CID is checked on
+`ipfs.filebase.io`, and the manifest is pinned on Filebase and Pinata. Two things finish on their own: the
+`gateway.pinata.cloud` byte checks (detached, about 12 h) and the pending Pinata pins. Nothing below reruns or writes.
 
-1. **Upload, Filebase pins and the gateway checks so far** (the kit's evidence record). Pass: the line below.
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
+```
+
+1. **The publication record.** Pass: the line below.
    ```bash
-   cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-   jq -c '{status, read_back: (.upload.read_back | length), retried: .upload.attempts[2].retried_attempts, upload_failures: (.upload.attempts[2].failures | length), filebase: (.filebase_pins | {pinned, cids, controls_pinned}), gateways: .gateway_checks.per_gateway}' docs/evidence/travis-t6-publication-20261018T143520Z.json
+   jq -c '{manifest: (.manifest | {cid, sha256, objects, cars, filebase_add_cid_equal, pinata}), uploads: (.upload.read_back | length), filebase_gateway: (.gateway_checks.filebase | {match, mismatch, unverified}), pinata_before_pins: .gateway_checks.pinata_before_pins.match, pins_at_bound: (.pins.at_bound | {pinned, refused})}' docs/evidence/travis-t6-publication-20261018T143520Z.json
    ```
-2. **Ten read-back roots served by Filebase's public gateway** (public HTTP, one per second). Pass: `10 200`.
+2. **The manifest fetched by its CID equals the repository's copy** (public HTTP). Pass: the same hash twice, `4a0f3231…`.
    ```bash
-   for c in $(jq -r '.upload.read_back[:10][].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; sleep 1; done | sort | uniq -c
+   curl -s --max-time 60 https://ipfs.filebase.io/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4 | shasum -a 256
+   shasum -a 256 /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/publish/20261018T143520Z-t5-full/manifest.json
    ```
+3. **Pinata pins now** (read-only; loads the JWT into this shell). Pass: `"pinned"` 274 or more of 355, rising to 355;
+   `pending` holds only Pinata job states (`retrieving`, `prechecking`, `searching`), and `not_listed` is 0.
+   ```bash
+   set -a; . /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/.env; set +a
+   node src/counties/travis/t6-publish.mjs pin-status --out data/travis/publish/20261018T143520Z-t5-full --extra-cids bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4
+   ```
+4. **The background Pinata-gateway check.** Pass: `"mismatch":0` and `"running":true` (or, once done, `"finished":true`
+   with `"remaining":0` and `"unverified":0`).
+   ```bash
+   node src/counties/travis/t6-publish.mjs gateway-status --out data/travis/publish/20261018T143520Z-t5-full --jsonl gateway-checks-pinata.jsonl --gateway https://gateway.pinata.cloud --extra-jobs 1
+   ```
+5. **Demo:** open `https://ipfs.io/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4` in a normal browser.
+   Pass: the manifest JSON, whose `label` starts with "run 1: the shard archives". (ipfs.io serves browsers through its
+   service-worker gateway; the agent could not test that from a shell.)
 
-Then choose decisions.md 28.7 decision (10).
+Then say "T6 approved".
 
 <details>
 <summary>Full expected output</summary>
 
-1. `{"status":"uploaded with readback; gateway checks stopped on Pinata's hourly 429 (decisions.md 28.7)","read_back":354,"retried":17,"upload_failures":0,"filebase":{"pinned":3283,"cids":3283,"controls_pinned":0},"gateways":{"https://ipfs.filebase.io":{"raw_match":356,"file_match":235,"unverified":0,"mismatch":0},"https://gateway.pinata.cloud":{"raw_match":250,"file_match":0,"unverified":39,"mismatch":0}}}`
-2. `  10 200`
+1. `{"manifest":{"cid":"bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4","sha256":"4a0f3231ed7131e925f484aeb6d1448f2586ac5c9dc520b974cff678f8c009fb","objects":3285,"cars":354,"filebase_add_cid_equal":true,"pinata":"pinned"},"uploads":354,"filebase_gateway":{"match":3285,"mismatch":0,"unverified":0},"pinata_before_pins":250,"pins_at_bound":{"pinned":214,"refused":0}}`
+2. `4a0f3231ed7131e925f484aeb6d1448f2586ac5c9dc520b974cff678f8c009fb  -` then the same hash with the file path.
+3. For example, at 23:01Z: `{"checked_at":"2026-10-19T23:01:29.472Z","roots":355,"pinned":274,"pending":{"retrieving":81},"not_listed":0}`
+4. For example, at 23:05Z: `{"gateway":"https://gateway.pinata.cloud","running":true,"finished":false,"jobs":3286,"match":277,"mismatch":0,"unverified":14,"remaining":3009,"last_row_at":"2026-10-19T23:02:14.959Z"}`
 
 </details>

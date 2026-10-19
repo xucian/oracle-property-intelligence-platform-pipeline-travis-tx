@@ -1862,3 +1862,28 @@ Pinata call). The full verification ran (read-only) and its byte total is record
      354 directory roots and the 2 schemas in the manifest (each part stays reachable through its CountyTables root and
      its CAR, with its size and CID inside that block): 356 rows per gateway, about 1 more hour at Pinata's pace; cheaper,
      but it reads README.md:63's "query table" as the tables root rather than its parts, which a reviewer could contest.
+   - **Ruled: 3, the operator's ruling "go 3" (2026-10-20), replacing (1) and (2).** The manifest keeps every table part
+     (README.md:63, "every eligible object"). The full `ipfs.filebase.io` check finishes at the ruled scope. The Pinata
+     pins run now, without waiting for the Pinata gateway checks: the pre-pin ordering is dropped for the remaining
+     objects. The 250 roots Pinata's gateway matched at 21:28-21:37Z, before any Pinata pin, already show it fetching
+     from the public network; they are in the manifest's gateway rows. The manifest is written and pinned once the
+     Filebase check has passed and every pin is done or has its status recorded. The remaining `gateway.pinata.cloud`
+     rows (and the manifest's own) are checked afterwards in a detached background process (`t6-publish.mjs
+     gateway-paced`, kit `d13f340`): one request in flight, each `Retry-After` waited out in full (up to 6 rounds per
+     object), resuming from the 289 rows already made; its rows go to their own evidence file
+     (`runs/20261018T143520Z-t5-full.gateway-checks-pinata.json` when it finishes), never into the immutable manifest. A
+     mismatch, a 4xx other than 429 or a pin refusal stops the work; a row still unverified after the paced rounds is
+     kept with its status.
+   - **Ruling 3 as run (2026-10-19 22:04Z-22:59Z; kit `d13f340` and the read-only `pin-status`). T6 observed.**
+     `ipfs.filebase.io`: 3,285 of 3,285 rows matched (356 raw root blocks and schemas, 2,929 parts in full, 1,426,831,183
+     bytes), 0 mismatches, 0 unverified; 1,547 rows needed retries inside their deadline (at most 6 attempts), so the
+     operator's pre-approved slow passes ("retry unverified", 2026-10-20) were not needed. Pinata pins of the 354 roots,
+     at the 45-minute bound: 214 pinned, 140 pending (97 retrieving, 41 prechecking, 1 searching, 1 backfilled), 0 refused;
+     at 23:01:29Z 274 of 355 (the roots and the manifest) pinned, 81 retrieving. Manifest
+     `publish/20261018T143520Z-t5-full/manifest.json`: 3,285 objects, 354 CARs, 1,466,902 bytes, sha256 `4a0f3231…`, CID
+     **`bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4`** (Filebase's `add` returned the locally computed CID;
+     pinned on Pinata; its full bytes match on `ipfs.filebase.io`). Its gateway rows: Filebase's 3,285 and Pinata's 250
+     pre-pin matches (`runs/20261018T143520Z-t5-full.gateway-checks.json`). The remaining 3,036 `gateway.pinata.cloud` rows
+     (with the manifest's) run detached from 22:59:43Z (pid 19109, `caffeinate`, log
+     `data/travis/publish/20261018T143520Z-t5-full/gateway-checks-pinata.log`), about 250 an hour, so about 12 h. The
+     publication record: `runs/20261018T143520Z-t5-full.publication.json` (also kit `docs/evidence/`).
