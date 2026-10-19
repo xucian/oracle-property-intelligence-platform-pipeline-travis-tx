@@ -1334,3 +1334,184 @@ it with the one command of runbook section 7. Evidence: kit `docs/evidence/travi
    an inference the printed code does not make, by the standard that keeps `COMPOSITIO` off the covering members.
    Several structures per property stay out of v1: the lexicon reaches them only through building layouts
    (`property_has_layout` → `layout_has_structure`), not a pre-run fix.
+
+## 27. 2026-10-19: T5 phase B — the full run reconciled, three deviations explained, three points open
+
+The full run `20261018T143520Z-t5-full` (kit `962f851`, CLI 1.58.1, lexicon manifest `7084b933…` at start and end) was
+started on 2026-10-18 at 14:35:20Z by the coordinator at the operator's request and printed `done` at 2026-10-19
+03:14:36Z (12.23 hours to the run record). Phase B reconciled it offline; nothing was re-run, uploaded, pinned or
+registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (the phase B run record), the run's own
+`run.json` (SHA-256 `a0732ed3…`, copied byte for byte to `runs/20261018T143520Z-t5-full.json`), and
+`src/counties/travis/t5-reconcile.mjs`, which recomputes every number below in about 70 seconds.
+
+**Reconciled (the T5 check of section 2 item 5):**
+
+1. **`seed = ready + dead + invalid`: 441,961 = 441,924 + 37 + 0.** All 1,157 stage markers of the 89 shards match
+   their recomputed inputs, with the code as of `962f851`. The full verification re-hashed every output the markers
+   name: 683,895 files, 28.33 GB, 271 seconds, all equal. The permit capture verifies against its receipts (270
+   partitions). The Loader generation matches its marker and is the one in force. `run.json` equals the record
+   rebuilt from the markers.
+2. **CARs.** There are 177 archives, and every one passed all six `elephant-cli validate` checks with 0 errors:
+   - County: 89 archives, 9,689,788 blocks, 441,924 properties;
+   - Property Improvement: 88 archives, 5,398,330 blocks, 237,531 properties.
+   There are also 177 tables CARs: County 26 tables in 2,313 parts, Property Improvement 7 tables in 616 parts.
+3. **Counts per table (the CLI's own exports).**
+   - County: property, parcel, `property_has_address`, `property_has_parcel`, `address_has_parcel`, tax and
+     `property_has_tax` 441,924 each.
+   - Addresses: 883,548 (441,924 situs, plus 343,957 person and 97,667 company mailing addresses).
+   - Geometry: `address_has_geometry` 373,482; geometry and `parcel_has_geometry` 375,022. That is 373,482 points plus
+     1,540 polygon parts: the seed's 1,593 parts on 616 multi-part parcels, less 53 parts on 2 dead accounts.
+   - Other County tables: lot 441,587, structure 324,617, sales history 423,970, person 343,957, company 97,667.
+   - Property Improvement: `property_improvement` and `property_has_property_improvement` 1,986,484 each; property,
+     address and parcel 237,531.
+   - Internal tables: permits 2,380,707, query table 441,924, roof age 441,924.
+4. **Permits.** Captured 2,380,707, linked 1,986,523, made up as follows:
+   - exact `geo_id` 1,978,992;
+   - `tcad_permit_listing` 7,531.
+
+   The unlinked rows:
+   - `no_candidate` 251,888;
+   - `multiple_candidates` 38,249;
+   - `invalid_quarantined` 178;
+   - `out_of_county` 103,869.
+
+   Published: 1,986,484 on 237,531 parcels. That is the linked total less 39 permits on 2 dead accounts (554109,
+   986147), which stay internal. All three evidence-state maps sum to the capture.
+5. **Roof age.** 441,924 parcels; 390,210 have an age (eligible):
+   - 12,199 rest on a completed primary-roof replacement (high confidence);
+   - 96,601 on a completed new-construction roof permit (medium);
+   - 281,410 fall back to the published built year (low).
+
+   51,714 parcels have neither and get no age. 276,667 are older than 15 years. The 108,800 permit anchors date from
+   the `completed_date` (35,161) or, on a Final permit, the status date (73,639); 3,086 came through TCAD's listing.
+   T4's link-pass figure was 108,733 under the stricter rule of a confirmed `completed_date`. The difference is exact:
+   2 of those parcels are dead, and 69 parcels the estimator anchors on a Final permit's status date have no
+   `completed_date`.
+6. **Loader.** This is the first generation of scope `full`, so there is no prior and every delta is new:
+   441,924 appraisal, 237,531 permit groups, 2,380,707 permits. 37 dead tombstones, 0 invalid, 0 stale rows removed.
+   Three content-aware watermarks:
+   - appraisal: 441,924 merged;
+   - permit capture: 270 partitions, 2,380,707 rows;
+   - permit groups: 237,531 groups, 1,986,484 rows.
+
+   The seven T3 registry and licensing watermarks are unchanged. The run history holds one finalize, at 02:47:43Z,
+   with its state digest.
+7. **Limitations.** All 18 are still true, and their numbers recompute from the record's own counts. They miss four
+   things:
+   - the 22 accounts with no situs street (a source fact);
+   - the 3 accounts with the street in shifted columns (point 10);
+   - the 12 accounts the bounding box refused (a pipeline defect, point 9);
+   - the 39 permits (6 roofing) on dead accounts, which make 35,463 roofing permits shown on no property, not the
+     35,457 listed.
+
+   `run.json` is not edited by hand, since `--verify` proves it equals what the markers imply. The record builder
+   gains the four items with the fix of point 9, which rewrites `run.json`, or at the latest when T6 writes the
+   published record.
+
+**Deviations, explained:**
+
+8. **37 dead, not 25.** Every one is a permanent failure in the appraisal stage, from the transform's own guards. None
+   reached `elephant-cli`.
+   - **25: the T2 roll rows with a blank situs street.** In 21 of them the roll prints no situs part at all, and
+     773537 prints only a house number: the source lacks the street. In the other 3 the roll prints the street one
+     column to the right (point 10).
+   - **12: refused by `assertGeometryInCounty`** (adapter `validate.mjs`, box 30.02–30.63 N, −98.17 to −97.37 W).
+     These are county-line accounts on Hamilton Pool Rd, Round Mountain Rd, Zurga Ln, Cow Creek Rd and County Line
+     Rd, in shards s0039 (6), s0040, s0066, s0067 (2), s0068 and s0081.
+     - For 10 of them only polygon vertices lie past the box; for 2 the centroid does too (by 1 m and 770 m). The
+       worst vertex is 1.5 km past the box.
+     - TCAD appraises them and the TNR layer draws them. That layer's own centroid extent reaches −98.178 W and
+       30.6287 N, while the contract calls the box "about" the county.
+     - **This is a pipeline defect, not a source fact.** None of the 12 has a linked permit. The dry runs, on the
+       first 5,000 PROP_IDs, never reached them.
+   - Cost of fixing it is point 9.
+
+   **The other deviations:**
+   - **354 CARs, not 356.** Shard s0089 holds the 1,961 newest accounts (PROP_IDs 1012767–1020110) and has no
+     Property Improvement group, so it has no archive and no tables CAR. Only 7 of its 1,955 `geo_id`s appear on any
+     permit (618 permits). Each of the 7 is shared with an older account, two or three accounts per id, so the ruled
+     link rule leaves all 618 as `multiple_candidates` and none links. This is a source fact under the ruled rule.
+   - **The runner did not exit.** Pid 15367 stayed alive after `done` at 0% CPU, with its `caffeinate` child.
+     - A read-only `sample` of the process shows the event loop had ended and C `exit()` was running. The main
+       thread is in libuv's `uv__threadpool_cleanup`, in `uv_thread_join` (Node 22.22.0, libuv 1.51.0, macOS 26.5),
+       with 3 of the 4 workers parked in `uv_cond_wait`. No JS can run, so nothing more can be written.
+     - It is not the lexicon fetch's keep-alive (no TCP socket is open), not the progress interval (unref'd and
+       cleared) and not `caffeinate` (it waits for its parent with `-w`).
+     - It did not reproduce on a 60-parcel whole-seed run or on the three dry runs.
+     - **Fixed in kit `6107969`.** `main()` flushes its output and calls `process.exit(code)` on every path. Before
+       that it arms a detached watchdog, which sends SIGTERM and then SIGKILL if the runner is still alive 30 s after
+       exiting. It never touches a process whose command line no longer names `t5-run`.
+     - Tested: a real runner child with a leaked handle exits 0 right after `done`, and the test fails without the
+       fix.
+     - **Stopping 15367 is safe:** `kill 15367`, and `kill -9 15367` if it is still there after 5 seconds.
+       `caffeinate` (15384) ends with it.
+   - **Timing and resources.** Wall time was 12.23 h against the 14.5 h projected. Peak memory was 12.2 GB for the 8
+     CLI processes (12.8 GB with the runner), against the ~9 GB estimated. Swap went from 5.5 to 4.9 GB, with no
+     growth. 25 of the 27 finalize minutes are the record's disk figure: `bytesUnder` stats about 13 million files.
+     The run directory holds 66.1 GB of file bytes.
+   - **Resume is now a no-op on a finished run.** Before phase B, the same start command would have started a new
+     run in a new directory: `latestUnfinished` skips finished runs, so the operator could have started a 12-hour run
+     by mistake.
+     - Since `6107969` it only verifies the finished run, read-only, in about 5 seconds, then exits 0. Nothing at any
+       depth of the run or Loader directory changes.
+     - `--verify` also re-hashes every output (about 4.5 minutes). `--new` starts a new run. `--reopen` reruns a
+       finished run in place.
+   - **Sizes (for T6's Filebase and Pinata plans), measured from the CARs block by block and the part files:**
+     - County: 4.974 GB distinct, 9.947 GB as Filebase counts it.
+     - Property Improvement: 4.471 GB distinct, 8.942 GB counted.
+     - Together: 9.445 GB distinct (9.065 GB without the 0.38 GB of property blocks both groups share) and 18.889 GB
+       counted.
+     - The estimate of 25.9 was 8.76 and 17.51 GB. County grew 17% with transform v4's extras (structure, lot, tax,
+       geometry parts); Property Improvement is 1% under.
+
+**Open for the operator:**
+
+9. **The 12 accounts the bounding box refused** (a pipeline defect). The fix: the adapter validates against the
+   wider box the seed builder already uses (29.95–30.75 N, −98.25 to −97.30 W). That box contains every TNR centroid
+   and every vertex of the 12. A 1-line change plus a test.
+
+   The difficulty: `validate.mjs` is part of the code digest of every shard's appraisal and permits stages.
+
+   - **A — scoped rerun before T6 (recommended).** Rerun shards s0039, s0040, s0066, s0067, s0068 and s0081 (with
+     s0084 if point 10 is taken) under the fixed guard. Re-certify the other 82 shards' markers in place: each keeps
+     its outputs and records its old input digest and why.
+
+     This is sound because the guard only decides whether a parcel is refused, and the reconciliation shows these 12
+     are its only refusals in the roll. A new runner option, with a test, is needed: about 1 hour to build.
+
+     Running it takes about 1.5 hours:
+     - the 7 County chains in parallel, about 50 minutes (validate 44–45 minutes each);
+     - the Property Improvement chains and merges, about 12 minutes;
+     - the finalize and the record, about 27 minutes.
+
+     It needs about 13 GB of disk. County roots change for those shards only; the record gains the four missing
+     limitations.
+   - **B — `--reopen` as built.** Every shard's appraisal and permits stages rerun, about 36 minutes at 8 in flight,
+     and the link pass reruns because `t5-run.mjs` changed since the run. Then the same 7 County chains and the
+     finalize: about 2 hours in all.
+
+     But each rerun stage writes a new attempt directory: about 1.5 GB on disk per shard, plus 7.1 GB for the link
+     pass, about 140 GB in all. The disk has 44 GiB free, so B needs space freed first.
+   - **C — defer to run 2 (T10).** T6 publishes 441,924 accounts and lists the 12 as a pipeline limitation. The fix
+     goes into the code before run 2, which reruns everything anyway.
+
+   Recommended: **A**. The first publication then holds every account TCAD appraises and the TNR layer draws, and
+   only 7 County roots change before anything is published.
+10. **The 3 accounts whose street is printed one column to the right:**
+    - 954255: `E` / `PARMER` / `LN` in prefix, suffix and unit;
+    - 978103 and 978104: `PINNACLE` / `CV` in suffix and unit.
+
+    The source prints the street, only in the wrong columns.
+    - **(i) Read the shifted columns, for exactly this pattern:** the street column blank, a name in the suffix
+      column, a 2–4 letter suffix word in the unit column. The name becomes the street name, the unit word goes
+      through the transform's suffix table, and the sidecar flags `situs_columns_shifted`. Run with point 9 A: s0081
+      already reruns, and s0084 adds one shard in parallel.
+    - **(ii) Keep them dead** as a source data-entry defect, listed with proof.
+
+    Recommended: **(i)**. Under the README rule, data is missing only where the source lacks it, and here it does not.
+11. **Disk.** 44 GiB of 1.8 TiB is free (98% used). The run directory holds 66.1 GB of file bytes; its allocated size
+    is in the evidence record.
+    - T6 (upload) and point 9 A fit in that space.
+    - Run 2 (T10) writes about as much as run 1 again. Before T10, free at least 160 GB or move `data/` to a larger
+      volume. The agent deletes nothing.
+    - Recommended: decide before T10; it does not block T6.

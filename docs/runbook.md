@@ -412,14 +412,69 @@ reruns only what was in flight. The ETA counts only the shards that still run. A
 failed (…)` is resumed the same way, after fixing the cause named in `failures.jsonl` (for example disk space). Do not add
 `--new`: that starts the run over in a new directory.
 
-### What "done" prints
+Once the run is finished, the same command no longer starts or resumes anything (kit `6107969`). It verifies the
+finished run read-only, in about 5 seconds, prints `"status":"verified"` and exits 0. A new run needs `--new` (T10).
+`--reopen` reruns a finished run in place, for a fix such as decisions.md 27.9; only stages whose inputs changed run, and
+`run.json` is rewritten with a new attempt.
+
+The runner exits by itself after `done`, a failure or a signal. If Node's own teardown stalls, as it did once after the
+full run, the log ends with
+`[t5] exit watchdog: pid <n> is still alive 30 s after it exited with code 0 (…); sending SIGTERM`. Everything was written
+before that line.
+
+### What "done" printed (run `20261018T143520Z-t5-full`, 2026-10-19 03:14:36Z)
 
 ```
-{"travis_t5_run":"<timestamp>-t5-full","status":"finished","seed":441961,"ready":441936,"dead":25,"invalid":0,"reconciles":true,"shards":89,"cars":356,"permits_published":1986484,"roof_age_eligible":…,"wall_h":…,"run_record":"data/travis/runs/<timestamp>-t5-full/run.json"}
-[t5] done: data/travis/runs/<timestamp>-t5-full/run.json
+{"travis_t5_run":"20261018T143520Z-t5-full","status":"finished","seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390210,"wall_h":12.23,"run_record":"data/travis/runs/20261018T143520Z-t5-full/run.json"}
+[t5] done: data/travis/runs/20261018T143520Z-t5-full/run.json
 ```
 
-The 25 dead accounts are the roll rows without a situs street (T2); 39 linked permits sit on 2 of them and stay internal.
-`invalid` other than 0 means `elephant-cli validate` rejected some properties: they are left out of the archives,
-tombstoned as invalid and listed in `run.json`. The post-run checklist (reconciliation, counts per table, the run record
-in this repository's `runs/`) is written in phase B, after the run.
+Phase A expected 25 dead and 356 CARs. decisions.md section 27 explains both.
+- **Dead.** The 25 roll rows without a situs street, plus 12 county-line accounts that the adapter's rounded bounding
+  box refused. The 12 are a pipeline defect, open as 27.9. Three of the 25 print the street in shifted columns, open as
+  27.10.
+- **CARs.** Shard s0089 has no Property Improvement group: none of its accounts holds a linked permit.
+- **Exit.** The process did not exit after `done`. That is fixed in kit `6107969`.
+
+### Post-run checklist (about 10 minutes, offline, in the kit runtime; nothing reruns the 12 hours)
+
+Run every step in one terminal; it never needs the VPN. First stop the old runner: the coordinator does this with you,
+as `kill 15367`, then `kill -9 15367` if it is still there after 5 seconds. Its `caffeinate` (15384) ends with it.
+
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
+t5() { node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full "$@"; }
+R=data/travis/runs/20261018T143520Z-t5-full
+```
+
+1. **No runner left:** `pgrep -lf t5-run.mjs` → no output.
+2. **Resume is a no-op** (about 5 seconds):
+   ```bash
+   STAMP=$(mktemp); sleep 1; t5 | tail -1 | jq -c '{status, mode, stages_checked, outputs_checked, run_json, mismatch_count, wrote, counts}'; find $R data/travis/loader/full -maxdepth 3 -newer "$STAMP" | wc -l; ls data/travis/runs | grep -c -- '-t5-full$'
+   ```
+   It prints three lines. The first is
+   `{"status":"verified","mode":"quick","stages_checked":1157,"outputs_checked":1688,"run_json":"equal","mismatch_count":0,"wrote":"nothing","counts":{"seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390210}}`.
+   Then `0`: nothing was written where the runner writes when it starts a stage. Then `1`: no new run directory.
+3. **Every output re-hashed** (about 5 minutes):
+   `t5 --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'`
+   → `{"status":"verified","outputs_rehashed":{"files":683895,"bytes":28334269318},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`.
+4. **Reconciliation** (about 75 seconds):
+   `node --max-old-space-size=12288 src/counties/travis/t5-reconcile.mjs --run $R | jq -c '{all_checks_pass, dead, dead_shards: (.dead_shards | length), s0089: .shards_without_property_improvement.s0089, sizes: .sizes_gb.total, anchors: .roof_age_anchors, limitations_missing}'`
+   → `{"all_checks_pass":true,"dead":{"no_situs_street:nothing_printed":21,"outside_validation_bbox":12,"no_situs_street:number_only":1,"no_situs_street:columns_shifted":3},"dead_shards":23,"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":4}`.
+   Add `--out <file>` for the whole report: every dead account with its seed facts and metres past the box, the geo_ids
+   of s0089, the sizes per group, and the limitations recomputed.
+5. **The 37 dead as the Loader tombstoned them:**
+   `jq -r '.evidence | sub("coordinate .* is"; "coordinate … is")' data/travis/loader/full/generations/20261018T143520Z-t5-full/tombstones.jsonl | sort | uniq -c`
+   → `12 coordinate … is outside the Travis bbox` and
+   `25 no situs address: the roll prints no situs street for this account`.
+6. **The run record:**
+   `jq -c '{appraisal: (.counts.appraisal | {seed, ready, dead, invalid, reconciles}), cars: ([.cars[] | "\(.group)/\(.kind)"] | group_by(.) | map({(.[0]): length}) | add), car_errors: ([.cars[] | select(.kind == "archive") | .car_validation | to_entries[] | select(.key | endswith("_errors")) | .value] | add), published: .counts.permits.published, roof_age: .roof_age.by_basis, tombstones: .tombstones_consumed, history: (.run_history | length)}' $R/run.json`
+   → `{"appraisal":{"seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true},"cars":{"county/archive":89,"county/tables":89,"property_improvement/archive":88,"property_improvement/tables":88},"car_errors":0,"published":1986484,"roof_age":{"new_construction":96601,"year_built":281410,"none":51714,"completed_replacement":12199},"tombstones":{"dead":37,"invalid":0},"history":1}`.
+7. **The repository's run record is the run's:**
+   `shasum -a 256 $R/run.json /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/runs/20261018T143520Z-t5-full.json`
+   → the same `a0732ed3e34bf404918dda792150a06e44c4173835a4517a0d257b8fc0a27afb` twice.
+8. **Readiness:** `python3 ../scripts/validate-county-readiness.py docs/travis-sources.yaml | jq -r .overall` → `PASS`.
+9. **Tests:** `npx vitest run tests/travis-*` → `Test Files 33 passed (33)` and `Tests 248 passed (248)`.
+
+Then rule decisions.md 27.9–27.11. If you take 27.9 A, the agent builds the scoped rerun and you run it (about 1.5
+hours), then repeat steps 2–7 with the new numbers. Otherwise say "T5 approved".
