@@ -1678,3 +1678,69 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
       GB), and the system temp directory holds 12 stale `cdk.out` directories of other projects (19 GB).
 
 **Open:** nothing for T5 beyond the operator's approval. Before T6, the free space of point 18.
+
+## 28. 2026-10-19: T6 step 0 — Atlas registers one archive per data group; run 1 has 177; stopped before anything was built or uploaded
+
+The operator's conditional go for T6 required that Atlas accepts a county registered as many shard archives. It does
+not, so nothing was built, uploaded, pinned or registered (no full-DAG tables CAR, no import test, no Filebase or
+Pinata call). The full verification ran (read-only) and its byte total is recorded below.
+
+1. **Evidence (elephant-xyz/atlas `main`, public since 2026-10-17; read 2026-10-19).**
+   - `schema/entry.schema.json`: "The current state of one county: one archive per data group." `groups` maps a
+     data-group key ("`county`, `property_improvement`, ...") to exactly one `{cid, schema, tables}`; `cid` is "CountyIndex
+     root of the archive".
+   - `CONTRIBUTING.md`: set `groups.<data_group>` to `{ "cid", "schema", "tables" }`; "to supersede an archive, change `cid`
+     and `tables`".
+   - The CLI writer: `export-tables --atlas-page` keys the entry by the snake_cased schema title (`county`,
+     `property_improvement`) and supersedes an existing entry, so exporting 89 County archives over one page leaves the last
+     one. Kit `car-publication.md`: "one Content Addressable aRchive per county per data group"; withdrawing a key is the
+     only hand edit a page ever gets.
+   - Consumers: the MCP's `getAtlasDatasetInfo(state, county, dataGroup)` returns one data group's tables and CIDs;
+     `index.json` carries one entry per group (FL `jackson`, the only real page, has one `county` group).
+   - Mechanically the gate would not stop synthetic keys: the key pattern `^[a-z][a-z0-9]*(_[a-z0-9]+)*$` admits
+     `county_s0001`, uniqueness is checked for `cid` and `tables` only (not `schema`), and `verify-roots.mjs` checks each
+     changed group on its own. That is a loophole, not a registration format.
+   - Run 1's layout: 89 County and 88 Property Improvement archives, each its own `CountyIndex` root (the runner's
+     5,000-PROP_ID shards, decision 25.9). Section 7.1's "CAR shards follow the kit's 5,000-property cap" meant the
+     CLI's shards inside one archive.
+2. **The 375 CAR files against the record's 354.** 354 = 89 + 89 County (archive, tables.car) + 88 + 88 Property
+   Improvement, as `run.json` lists them (County archives 4,295,559,822 bytes, 9,690,099 blocks; Property Improvement
+   4,310,324,352 bytes, 5,398,330 blocks; largest archive s0015 Property Improvement, 125,009,886 bytes). The other 21
+   are attempt 1's files of the 7 rerun shards, kept on disk and not of record: 7 County archives and 7 County tables.car
+   (superseded, their roots changed) and 7 Property Improvement archives (the record points at attempt 2's copies; roots
+   unchanged). No pilot, feasibility or table-part file is among them. All 375 come to 9,153,568,915 bytes.
+3. **Options (the operator's decision; costs from `run.json` timings, T5 memory and disk).**
+   - **A. One merged archive per group**, from one `elephant-cli hash --output-car` over the union of the validated group
+     directories, then `validate` the CAR, `export-tables --atlas-page`, the full-DAG tables CAR. Property blocks,
+     property CIDs and data-group roots are content-derived and do not change, so the Loader, permits, roof age and the
+     per-parcel digests stand; 4 roots replace 354. Time: hash 5.3 h (County) and 2.2 h (Property Improvement), CAR
+     validate 1.8 and 0.5 h, export 0.3 and 0.2 h, as T5's per-shard sums; the groups side by side about 7.5 h wall if
+     the CLI is single-threaded. The group-directory `validate` is 66.4 + 12.3 h as one process, about 10 h rerun per
+     shard 8 at a time, or 0 h if the operator rules that the 177 digest-pinned per-shard validate markers cover the union.
+     Memory: unmeasured for one process over 441,939 properties (T5: about 1.05 GB per 5,000-property CLI process; linear
+     scaling would need about 93 GB on this 32 GB machine), so a sized merge of 10 shards (about 50,000 properties) comes
+     first. Disk: about 8.6 GB archives, 0.9 GB tables, about 16 GB hashed ZIPs, 1 GB full-DAG tables CARs (501 GiB free).
+     New work: a merge stage in the kit runner with tests, a run-record section, and the multi-GB `dag/import` test of the
+     2026-10-17 note. Atlas risk: its gate streams each archive (`?format=car`, about 4.3 GB) from `ipfs.filebase.io` or
+     `trustless-gateway.link` and runs `elephant-cli validate` on a GitHub runner within a 20-minute default deadline per
+     group (at least 3.6 MB/s sustained); unmeasured.
+   - **B. Register the shards under synthetic keys** (`county_s0001` ... , 177 entries). No rebuild, but a hand-written
+     page against the schema's description, CONTRIBUTING, the CLI writer and the kit, 177 data groups for one county in the
+     index and the MCP, and a likely refusal at code-owner review.
+   - **C. Ask the Atlas maintainers for multi-archive groups** (schema, `build-index`, `verify-roots`, the CLI's
+     `--atlas-page`, the MCP). No local cost; the timeline is theirs.
+   - **D. Decouple:** publish the README packet (Filebase, Pinata, manifest, gateway checks) on the shard layout now and
+     register later through A or C. Outside the conditional go (needs its own go). With A later, IPFS stores only the new
+     index and shard blocks, but Filebase may count each uploaded CAR again (about 18.9 GB now plus up to about 18.9 GB,
+     within 500 GB), and run 1 would carry two sets of CIDs, the shard set never registered in Atlas.
+4. **Second open point, found on the way: the two gateways.** Runbook section 3 records ipfs.io and dweb.link as retired
+   for automated clients (2026-09-21) and leaves the replacement pair to the operator; no ruling is recorded, so
+   README.md:69's check would come back unverified on every row. For reference, Atlas's own gate uses
+   `https://ipfs.filebase.io` and `https://trustless-gateway.link`.
+5. **Verification (pre-upload check 1, read-only).** `t5-run.mjs --verify` at kit `557207e` (2026-10-19): `verified`, 683,910 files
+   re-hashed, **28,609,472,173 bytes**, the true total with the counter fix (T5's recorded 28,544,896,999 and the later
+   28,428,041,013 lost increments across the concurrent shard checks), capture 0 mismatches, loader state equal, `run.json`
+   equal. Runbook section 7's expected line now carries this total.
+
+**Open:** the operator rules on point 3 (A, B, C or D; with A also the validate question) and on point 4. Nothing of
+T6 is built or published.

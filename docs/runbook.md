@@ -412,7 +412,7 @@ Then say "T5 approved".
 <details>
 <summary>Full expected output</summary>
 
-1. `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28544896999},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`
+1. `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28609472173},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`
 2. `{"all_checks_pass":true,"failed_checks":[],"dead":{"no_situs_street:nothing_printed":21,"no_situs_street:number_only":1},"dead_shards":17,"rulings":{"county_line":{"accounts":12,"ready":12},"situs_columns_shifted":{"seed_rows_matching":3,"ready":3,"sidecar_flagged":3}},"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":0}`
 3. `{"shards":["s0039","s0040","s0066","s0067","s0068","s0081","s0084"],"kit_commit_at_run":"962f851","recertified":{"shards":82,"stages":{"link":1,"appraisal":82,"permits":82}},"proofs":["link_stage_unchanged:true","situs_columns_branch:true","validation_box_widened:true"],"earlier_parcels_unchanged":34984,"identical":true,"newly_ready":15}`,
    then `165`, then `15a43cb8f6ac0b4f46306106f6d59d8a903a02898474dc2060f2a2943bd3fc2b` for both files.
@@ -508,5 +508,35 @@ both attempts and the gap between them; `last_attempt_h` is the rerun:
 ```
 
 decisions.md section 27 explains attempt 1's deviations and rules on them; points 12–18 record attempt 2.
+
+</details>
+
+## 8. T6 — publication, run 1 (stopped at step 0)
+
+T6 stopped before anything was built, uploaded, pinned or registered: Atlas registers one archive per county per data
+group, and run 1 has 177 (decisions.md section 28). These checks prove the stop and its two facts; nothing reruns and
+nothing is written. Then rule decisions.md 28.3 (A, B, C or D) and 28.4 (the two gateways).
+
+1. **Atlas's registration format** (public HTTP): one archive per data group, one `{cid, schema, tables}` per group key.
+   Pass: the description line, then `["cid","schema","tables"]`.
+   ```bash
+   curl -s https://raw.githubusercontent.com/elephant-xyz/atlas/main/schema/entry.schema.json | jq -c '.description, .properties.groups.patternProperties[].required'
+   ```
+2. **Run 1's layout and the verify byte total** (in the kit runtime, about 4.5 minutes for the second command). Pass:
+   `{"archives":{"county":89,"property_improvement":88},"tables":177,"cars":354}`, then the verified line below.
+   ```bash
+   cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
+   jq -c '{archives: ([.cars[] | select(.kind=="archive") | .group] | group_by(.) | map({(.[0]): length}) | add), tables: ([.cars[] | select(.kind=="tables")] | length), cars: (.cars | length)}' data/travis/runs/20261018T143520Z-t5-full/run.json
+   ELEPHANT_SKIP_UPDATE_CHECK=1 node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'
+   ```
+
+Then rule decisions.md 28.3 and 28.4.
+
+<details>
+<summary>Full expected output</summary>
+
+1. `"The current state of one county: one archive per data group. History lives in git."` then `["cid","schema","tables"]`
+2. `{"archives":{"county":89,"property_improvement":88},"tables":177,"cars":354}` then
+   `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28609472173},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`
 
 </details>
