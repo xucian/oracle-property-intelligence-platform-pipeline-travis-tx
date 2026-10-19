@@ -771,8 +771,9 @@ it the four pre-implementation reviews are done and `api-contract.md` v1 is froz
   `tsc -b`, Vitest (with the OpenAPI snapshot and CDK assertions) and `cdk synth --strict` on the fixture DuckDB with
   no lookups or credentials. `deploy` is run by the operator only, never on push.
 - **Cost table.** Standing lines at list price: S3 (mirror, deploy bucket, CDK assets), ECR image versions, each
-  Secrets Manager secret ($0.40 a month), alarms and dashboards beyond the free tier, log storage, and the Pinata
-  month. Per-request lines: Lambda, API Gateway, CloudFront, X-Ray, custom metrics, Bedrock. Plus the worst-case day at
+  Secrets Manager secret ($0.40 a month), alarms and dashboards beyond the free tier, log storage, the Pinata
+  month and the Filebase month (both paid plans: about 9.4 GB distinct, 18.9 GB as Filebase counts it, decisions.md
+  section 27; Filebase's free 5 GB no longer suffices). Per-request lines: Lambda, API Gateway, CloudFront, X-Ray, custom metrics, Bedrock. Plus the worst-case day at
   the throttle and concurrency ceilings. Lifecycle rules and `cdk gc` keep per-deploy artifacts from piling up;
   `project_name` is activated as a cost-allocation tag so Cost Explorer can back the table.
 - **Teardown and lifetime.** The stacks stay up with termination protection until the evaluation ends, since the
