@@ -773,7 +773,10 @@ it the four pre-implementation reviews are done and `api-contract.md` v1 is froz
 - **Cost table.** Standing lines at list price: S3 (mirror, deploy bucket, CDK assets), ECR image versions, each
   Secrets Manager secret ($0.40 a month), alarms and dashboards beyond the free tier, log storage, the Pinata
   month and the Filebase month (both paid plans: about 9.4 GB distinct, 18.9 GB as Filebase counts it, decisions.md
-  section 27; Filebase's free 5 GB no longer suffices). Per-request lines: Lambda, API Gateway, CloudFront, X-Ray, custom metrics, Bedrock. Plus the worst-case day at
+  section 27; Filebase's free 5 GB no longer suffices). Bought by the operator on 2026-10-19: Filebase Pro at $7.50 a
+  month (500 GB S3 and IPFS storage, 250 GB IPFS bandwidth, extra storage $0.015 a GB) and Pinata Picnic at $20 a
+  month (1 TB storage, 500 GB bandwidth, one gateway, extra storage $0.07 a GB); both cover run 1 and run 2 (about
+  40 GB as Filebase counts it). Per-request lines: Lambda, API Gateway, CloudFront, X-Ray, custom metrics, Bedrock. Plus the worst-case day at
   the throttle and concurrency ceilings. Lifecycle rules and `cdk gc` keep per-deploy artifacts from piling up;
   `project_name` is activated as a cost-allocation tag so Cost Explorer can back the table.
 - **Teardown and lifetime.** The stacks stay up with termination protection until the evaluation ends, since the
