@@ -360,73 +360,138 @@ export ELEPHANT_SKIP_UPDATE_CHECK=1   # elephant-cli exits with "update required
 
 ## 7. T5 — full run, reconciliation and signals
 
-The design is decisions.md section 25.9 (approved 2026-10-18); what phase A built and measured is section 26. One command
-runs the whole roll (441,961 accounts) through every stage, offline except for the public lexicon manifest: the readiness
-validator (the run stops unless `PASS`), the manifest (its SHA-256 is recorded and checked again on every resume and at
-the end; a change stops the run), the shard plan (89 shards of at most 5,000 sorted PROP_IDs), one link pass over the
-2,380,707 captured permits, then up to 8 shards in flight, each through the appraisal transform (v4), the permit transform,
-roof age and the internal query table, the County and the Property Improvement `elephant-cli` chains (validate, hash, CAR
-validate, export-tables) and the Loader's merge. Every stage writes an atomic `<stage>.done.json` with its input and output
-digests, so an interruption redoes only the shards in flight. The runner holds `caffeinate -dimsu -w <its pid>`, sets
-`ELEPHANT_SKIP_UPDATE_CHECK=1` and writes `run.json` (the `runs/<run_id>.json` record) at the end. Nothing is uploaded,
-pinned or registered (T6). Measured on the dry run: about 14.5 hours on this machine with swap at 5.5 of 7 GB, about
-125 GB on disk, a peak of about 9 GB for the 8 `elephant-cli` processes and the runner together (kit
-`docs/evidence/travis-t5-dry-run-2026-10-18.json`).
+**State: finished, waiting for the operator's "T5 approved".** Run `20261018T143520Z-t5-full` (kit `962f851`, two attempts,
+2026-10-18 14:35Z to 2026-10-19 09:02Z):
 
-### Preflight (about 5 minutes)
+- **Accounts:** 441,961 = 441,939 ready + 22 dead + 0 invalid; reconciles. The 22 dead are roll rows with no situs street,
+  a source fact.
+- **Shards and CARs:** 89 shards, 354 CARs, not 356: shard s0089 has no Property Improvement group, because none of its
+  accounts holds a linked permit.
+- **Permits published:** 1,986,484. **Roof age:** 390,212 eligible.
+- **Uploaded:** nothing; that is T6.
 
-1. `colima stop` (or quit Docker Desktop), then quit heavy apps (browsers with many tabs, other IDEs). Keep the Mac on AC
-   power with the lid open: `caffeinate` prevents idle and system sleep on AC; on battery a lid close still sleeps (that
-   counts as an interruption, see below).
-2. `sysctl vm.swapusage` → `used` well under half of `total`. The run warns above half or 4 GB, and a nearly full swap
-   doubled the County time in T4 (decisions.md 25.9). If `used` stays high after quitting apps, restart the Mac.
-3. `df -h /Users/luti` → at least 180 GB available for a new full run (the run writes about 126 GB; run 2 with T6 and a T7
-   rebuild needs the rest, decisions.md 27.18).
+Run record: `runs/20261018T143520Z-t5-full.json` (the kit's `run.json`, byte for byte). Design: decisions.md 25.9; dry run:
+section 26; rulings on attempt 1's deviations: section 27 (attempt 2, the scoped rerun of 7 shards: 27.12–27.18).
 
-The run repeats these checks at its start as warnings (`[t5] preflight warning: …`) and starts anyway.
+**Next:** the three post-run checks below, then say "T5 approved". Before T6, at least 50 GiB free (decisions.md 27.18).
 
-### Start: the one command
+### Post-run checklist (about 6 minutes, offline, in the kit runtime; nothing reruns)
+
+No VPN. First, once per terminal. It only sets up the shell, so it prints nothing: `pgrep` printing nothing (exit code 1)
+means no runner is left writing while step 1 re-hashes. The steps only read the run and can run in parallel; in a second
+terminal opened while step 1 runs, `pgrep` lists step 1's own `--verify` process, which is expected.
 
 ```bash
-cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
+t5() { node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full "$@"; }
+R=data/travis/runs/20261018T143520Z-t5-full
+pgrep -lf t5-run.mjs
 ```
+
+1. **Every output re-hashed** (about 4 minutes). Pass: `"status":"verified"`, `"mismatches":0`, `"loader":true`,
+   `"run_json":"equal"`.
+   ```bash
+   t5 --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'
+   ```
+2. **Reconciliation** (about 75 seconds): the counts, the 22 dead and their tombstones, every CAR's validation, the
+   county-line and shifted-situs rulings and the 20 limitations. Pass: `"all_checks_pass":true,"failed_checks":[]`. Add
+   `--out <file>` for the whole report.
+   ```bash
+   node --max-old-space-size=12288 src/counties/travis/t5-reconcile.mjs --run $R | jq -c '{all_checks_pass, failed_checks, dead, dead_shards: (.dead_shards | length), rulings, s0089: .shards_without_property_improvement.s0089, sizes: .sizes_gb.total, anchors: .roof_age_anchors, limitations_missing}'
+   ```
+3. **The run record:** the scoped rerun left the earlier parcels byte for byte the same (decisions.md 27.14–27.15), and
+   the repository's copy is the run's. Pass: `"identical":true`, then `165`, then the same hash twice.
+   ```bash
+   jq -c '.scoped_reruns[0] | {shards, kit_commit_at_run, recertified, proofs: [.code_changes[] | "\(.proof):\(.holds)"], earlier_parcels_unchanged: ([.comparisons[].appraisal.unchanged] | add), identical: ([.comparisons[] | .appraisal.identical and .permits.identical] | all), newly_ready: ([.comparisons[].appraisal.newly_ready | length] | add)}' $R/run.json
+   grep -l '"recertified"' $R/shards/*/*.done.json $R/global/*.done.json | wc -l
+   shasum -a 256 $R/run.json /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/runs/20261018T143520Z-t5-full.json
+   ```
+
+Then say "T5 approved".
+
+<details>
+<summary>Full expected output</summary>
+
+1. `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28544896999},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`
+2. `{"all_checks_pass":true,"failed_checks":[],"dead":{"no_situs_street:nothing_printed":21,"no_situs_street:number_only":1},"dead_shards":17,"rulings":{"county_line":{"accounts":12,"ready":12},"situs_columns_shifted":{"seed_rows_matching":3,"ready":3,"sidecar_flagged":3}},"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":0}`
+3. `{"shards":["s0039","s0040","s0066","s0067","s0068","s0081","s0084"],"kit_commit_at_run":"962f851","recertified":{"shards":82,"stages":{"link":1,"appraisal":82,"permits":82}},"proofs":["link_stage_unchanged:true","situs_columns_branch:true","validation_box_widened:true"],"earlier_parcels_unchanged":34984,"identical":true,"newly_ready":15}`,
+   then `165`, then `15a43cb8f6ac0b4f46306106f6d59d8a903a02898474dc2060f2a2943bd3fc2b` for both files.
+
+</details>
+
+### Running a full run (T10, or again)
+
+One command runs the whole roll through every stage, offline except for the public lexicon manifest:
+
+- the readiness validator (the run stops unless `PASS`);
+- the manifest: its SHA-256 is recorded and checked again on every resume and at the end, and a change stops the run;
+- the shard plan: 89 shards of at most 5,000 sorted PROP_IDs;
+- one link pass over the 2,380,707 captured permits;
+- then up to 8 shards in flight. Each goes through the appraisal transform (v4), the permit transform, roof age and the
+  internal query table, the County and the Property Improvement `elephant-cli` chains (validate, hash, CAR validate,
+  export-tables) and the Loader's merge.
+
+Every stage writes an atomic `<stage>.done.json` with its input and output digests, so an interruption redoes only the
+shards in flight. The runner holds `caffeinate -dimsu -w <its pid>`, sets `ELEPHANT_SKIP_UPDATE_CHECK=1` and writes
+`run.json` at the end. Nothing is uploaded, pinned or registered. Measured: attempt 1 took 12.2 hours (the dry run
+projected 14.5 with swap at 5.5 of 7 GB), about 126 GB on disk, a peak of about 9 GB for the 8 `elephant-cli` processes and
+the runner together (kit `docs/evidence/travis-t5-dry-run-2026-10-18.json`).
+
+**Before you start (about 5 minutes)**
+
+1. `colima stop` (or quit Docker Desktop), then quit heavy apps (browsers with many tabs, other IDEs). Keep the Mac on AC
+   power with the lid open: `caffeinate` prevents sleep on AC only; on battery a lid close still sleeps, which counts as an
+   interruption.
+2. `sysctl vm.swapusage` → `used` well under half of `total`; a nearly full swap doubled the County time in T4
+   (decisions.md 25.9). macOS keeps swapped pages until their process exits, so if `used` stays high after quitting apps,
+   restart the Mac.
+3. `df -h /Users/luti` → at least 180 GB available (decisions.md 27.18).
+
+The run repeats checks 2 and 3 at its start as warnings (`[t5] preflight warning: …`) and starts anyway.
+
+**Start**
+
+```bash
+cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime && node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full --new
+```
+
+`--new` starts a new run directory. Without it the command never starts over: it resumes an unfinished `full` run, or, on a
+finished one, verifies it read-only in about 6 seconds, prints `"status":"verified"` and exits 0 (kit `6107969`).
 
 It prints `[t5] starting data/travis/runs/<timestamp>-t5-full (attempt 1, pid <n>); no-sleep caffeinate -dimsu -w <n>;
 ELEPHANT_SKIP_UPDATE_CHECK=1; loader scope full`, then about 3 minutes of global stages (the runner alone uses up to about
 6 GB during the link pass), then the shard pool. Leave the terminal open.
 
-### Watch
+**Watch**
 
 - The terminal prints one line a minute and one per finished shard, for example
   `[t5 2026-10-19T02:10:04Z] shards | shards 23/89 done, 8 in flight (s0024 county.validate, …) | parcels 115000/441961 | elapsed 3h48m | ETA 10h41m (about 12:51 local) | elephant-cli 8 procs 7.4 GB, runner 0.4 GB, swap 1.2 GB`.
 - From another terminal: `cat "$(ls -d data/travis/runs/*-t5-full | tail -1)/progress.txt"` (the same line), or
   `tail -f "$(ls -d data/travis/runs/*-t5-full | tail -1)/progress.jsonl"`.
-- A shard that fails is logged as `[t5] s00NN failed: …` and in `failures.jsonl` of the run directory; the other shards go
+- A shard that fails is logged as `[t5] s00NN failed: …` and in the run directory's `failures.jsonl`; the other shards go
   on.
 
-### Interrupted (Ctrl-C, a crash, `kill`, a sleep, a reboot)
+**Interrupted or failed** (Ctrl-C, a crash, `kill`, a sleep, a reboot, or an end with `[t5] N shard(s) failed (…)`)
 
-Run the same start command again. It finds the unfinished `full` run and prints `[t5] resuming
-data/travis/runs/<timestamp>-t5-full (attempt 2, …)`; it stops any `elephant-cli` process a killed runner left behind,
-checks the lexicon manifest against the one recorded at the start, skips every stage whose done-marker still matches and
-reruns only what was in flight. The ETA counts only the shards that still run. A run that ends with `[t5] N shard(s)
-failed (…)` is resumed the same way, after fixing the cause named in `failures.jsonl` (for example disk space). Do not add
-`--new`: that starts the run over in a new directory.
+Fix the cause named in `failures.jsonl`, if any (for example disk space), then run the start command again **without**
+`--new`. It prints `[t5] resuming data/travis/runs/<timestamp>-t5-full (attempt 2, …)`, stops any `elephant-cli` process a
+killed runner left behind, checks the lexicon manifest against the one recorded at the start, skips every stage whose
+done-marker still matches and reruns only what was in flight. The ETA counts only the shards that still run.
 
-Once the run is finished, the same command no longer starts or resumes anything (kit `6107969`). It verifies the
-finished run read-only, in about 6 seconds, prints `"status":"verified"` and exits 0.
-- A new run needs `--new` (T10).
-- `--reopen` reruns a finished run in place; only the stages whose inputs changed run.
+**Changing a finished run** (start command without `--new`, plus one of)
+
+- `--reopen` reruns it in place; only the stages whose inputs changed run.
 - `--rerun-shards s0039,s0040,…` (kit `1cf6ed1`, decisions.md 27.14) reruns only the named shards. Every other shard is
-  re-certified in place, or the run stops and names the shard it cannot re-certify. The kit must be committed first. A
-  scoped rerun that stops resumes with the same command.
+  re-certified in place, or the run stops and names the shard it cannot re-certify. Commit the kit first. A scoped rerun
+  that stops resumes with the same command.
 
-The runner exits by itself after `done`, a failure or a signal. Node's own teardown has stalled twice, after both
-attempts of the full run. When it does, the log ends with
-`[t5] exit watchdog: pid <n> is still alive 30 s after it exited with code 0 (…); sending SIGTERM` and, if needed,
-`… sending SIGKILL`. Everything was written before those lines.
+**Exit watchdog.** The runner exits by itself after `done`, a failure or a signal, but Node's own teardown has stalled
+after both attempts of the full run. The log then ends with `[t5] exit watchdog: pid <n> is still alive 30 s after it
+exited with code 0 (…); sending SIGTERM` and, if needed, `… sending SIGKILL`. Harmless: everything was written before
+those lines.
 
-### What "done" printed (run `20261018T143520Z-t5-full`)
+<details>
+<summary>What "done" printed for run 20261018T143520Z-t5-full</summary>
 
 Attempt 1 (the full run, 2026-10-19 03:14:36Z):
 
@@ -442,51 +507,6 @@ both attempts and the gap between them; `last_attempt_h` is the rerun:
 [t5] done: data/travis/runs/20261018T143520Z-t5-full/run.json
 ```
 
-decisions.md section 27 explains attempt 1's deviations and rules on them; points 12-18 record attempt 2.
-- **Dead.** The 22 that remain are roll rows with no situs street, a source fact.
-- **CARs.** There are 354, not 356: shard s0089 has no Property Improvement group, because none of its accounts holds a
-  linked permit.
+decisions.md section 27 explains attempt 1's deviations and rules on them; points 12–18 record attempt 2.
 
-### Post-run checklist (about 10 minutes, offline, in the kit runtime; nothing reruns)
-
-Run every step in one terminal; none needs the VPN.
-
-```bash
-cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-t5() { node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full "$@"; }
-R=data/travis/runs/20261018T143520Z-t5-full
-```
-
-1. **No runner left:** `pgrep -lf t5-run.mjs` → no output.
-2. **Resume is a no-op** (about 6 seconds):
-   ```bash
-   STAMP=$(mktemp); sleep 1; t5 | tail -1 | jq -c '{status, mode, stages_checked, outputs_checked, run_json, mismatch_count, wrote, counts}'; find $R data/travis/loader/full -maxdepth 3 -newer "$STAMP" | wc -l; ls data/travis/runs | grep -c -- '-t5-full$'
-   ```
-   It prints three lines. The first is
-   `{"status":"verified","mode":"quick","stages_checked":1157,"outputs_checked":1688,"run_json":"equal","mismatch_count":0,"wrote":"nothing","counts":{"seed":441961,"ready":441939,"dead":22,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390212}}`.
-   Then `0`: nothing was written where the runner writes when it starts a stage. Then `1`: no new run directory.
-3. **Every output re-hashed** (about 4 minutes):
-   `t5 --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'`
-   → `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28544896999},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`.
-4. **Reconciliation** (about 75 seconds):
-   `node --max-old-space-size=12288 src/counties/travis/t5-reconcile.mjs --run $R | jq -c '{all_checks_pass, failed_checks, dead, dead_shards: (.dead_shards | length), rulings, s0089: .shards_without_property_improvement.s0089, sizes: .sizes_gb.total, anchors: .roof_age_anchors, limitations_missing}'`
-   → `{"all_checks_pass":true,"failed_checks":[],"dead":{"no_situs_street:nothing_printed":21,"no_situs_street:number_only":1},"dead_shards":17,"rulings":{"county_line":{"accounts":12,"ready":12},"situs_columns_shifted":{"seed_rows_matching":3,"ready":3,"sidecar_flagged":3}},"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":0}`.
-   Add `--out <file>` for the whole report: every dead account with its seed facts, the 12 county-line and 3
-   shifted-situs accounts with their state, the geo_ids of s0089, the sizes per group, and the limitations recomputed.
-5. **The 22 dead as the Loader tombstoned them:**
-   `jq -r .evidence data/travis/loader/full/generations/20261018T143520Z-t5-full/tombstones.jsonl | sort | uniq -c`
-   → `22 no situs address: the roll prints no situs street for this account`.
-6. **The run record:**
-   `jq -c '{appraisal: (.counts.appraisal | {seed, ready, dead, invalid, reconciles}), cars: ([.cars[] | "\(.group)/\(.kind)"] | group_by(.) | map({(.[0]): length}) | add), car_errors: ([.cars[] | select(.kind == "archive") | .car_validation | to_entries[] | select(.key | endswith("_errors")) | .value] | add), published: .counts.permits.published, roof_age: .roof_age.by_basis, tombstones: .tombstones_consumed, deltas: .deltas.appraisal | {new, unchanged}, limitations: (.limitations | length), history: (.run_history | length)}' $R/run.json`
-   → `{"appraisal":{"seed":441961,"ready":441939,"dead":22,"invalid":0,"reconciles":true},"cars":{"county/archive":89,"county/tables":89,"property_improvement/archive":88,"property_improvement/tables":88},"car_errors":0,"published":1986484,"roof_age":{"new_construction":96601,"year_built":281412,"none":51727,"completed_replacement":12199},"tombstones":{"dead":22,"invalid":0},"deltas":{"new":15,"unchanged":441924},"limitations":20,"history":2}`.
-7. **The scoped rerun's proof** (decisions.md 27.14-27.15):
-   `jq -c '.scoped_reruns[0] | {shards, kit_commit_at_run, recertified, proofs: [.code_changes[] | "\(.proof):\(.holds)"], earlier_parcels_unchanged: ([.comparisons[].appraisal.unchanged] | add), identical: ([.comparisons[] | .appraisal.identical and .permits.identical] | all), newly_ready: ([.comparisons[].appraisal.newly_ready | length] | add)}' $R/run.json; grep -l '"recertified"' $R/shards/*/*.done.json $R/global/*.done.json | wc -l`
-   → `{"shards":["s0039","s0040","s0066","s0067","s0068","s0081","s0084"],"kit_commit_at_run":"962f851","recertified":{"shards":82,"stages":{"link":1,"appraisal":82,"permits":82}},"proofs":["link_stage_unchanged:true","situs_columns_branch:true","validation_box_widened:true"],"earlier_parcels_unchanged":34984,"identical":true,"newly_ready":15}`,
-   then `165`.
-8. **The repository's run record is the run's:**
-   `shasum -a 256 $R/run.json /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/runs/20261018T143520Z-t5-full.json`
-   → the same `15a43cb8f6ac0b4f46306106f6d59d8a903a02898474dc2060f2a2943bd3fc2b` twice.
-9. **Readiness:** `python3 ../scripts/validate-county-readiness.py docs/travis-sources.yaml | jq -r .overall` → `PASS`.
-10. **Tests:** `npx vitest run tests/travis-*` → `Test Files 34 passed (34)` and `Tests 265 passed (265)`.
-
-Then say "T5 approved". Before T6, free the disk decisions.md 27.18 asks for: at least 50 GiB.
+</details>
