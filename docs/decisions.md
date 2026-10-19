@@ -1447,8 +1447,8 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
        `caffeinate` (15384) ends with it.
    - **Timing and resources.** Wall time was 12.23 h against the 14.5 h projected. Peak memory was 12.2 GB for the 8
      CLI processes (12.8 GB with the runner), against the ~9 GB estimated. Swap went from 5.5 to 4.9 GB, with no
-     growth. 25 of the 27 finalize minutes are the record's disk figure: `bytesUnder` stats about 13 million files.
-     The run directory holds 66.1 GB of file bytes.
+     growth. 25 of the 27 finalize minutes are the record's disk figure: `bytesUnder` stats about 50 million entries, 569,504 in one full shard.
+     The run directory holds 66.1 GB of file bytes and takes 125.8 GB allocated (phase A estimated about 125 GB); the Loader scope takes 2.5 GB.
    - **Resume is now a no-op on a finished run.** Before phase B, the same start command would have started a new
      run in a new directory: `latestUnfinished` skips finished runs, so the operator could have started a 12-hour run
      by mistake.
@@ -1509,8 +1509,8 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
     - **(ii) Keep them dead** as a source data-entry defect, listed with proof.
 
     Recommended: **(i)**. Under the README rule, data is missing only where the source lacks it, and here it does not.
-11. **Disk.** 44 GiB of 1.8 TiB is free (98% used). The run directory holds 66.1 GB of file bytes; its allocated size
-    is in the evidence record.
+11. **Disk.** 44 GiB of 1.8 TiB was free after the run (98% used). The run directory takes 125.8 GB allocated and the
+    Loader 2.5 GB. Phase B's 60-parcel exit probe left 3.4 GB in the session scratchpad, now 42 GiB free.
     - T6 (upload) and point 9 A fit in that space.
     - Run 2 (T10) writes about as much as run 1 again. Before T10, free at least 160 GB or move `data/` to a larger
       volume. The agent deletes nothing.
