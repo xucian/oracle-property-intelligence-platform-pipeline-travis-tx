@@ -1815,3 +1815,29 @@ Pinata call). The full verification ran (read-only) and its byte total is record
      each transient error: at 1 error in about 33 uploads, about 10 more stops over the remaining 325. Either way the
      remaining upload is about 23 h of uploads in sequence, about 6 h wall at concurrency 4 (about 3 h at 8, if Filebase
      takes it; 502s argue for 4), then the gateway checks (about 1 h) and the pins (at most 45 minutes).
+   - **Applied: (i), the operator's go "go i" at 8 uploads in flight (2026-10-19). Two deviations:** (1) a bounded retry
+     per upload in the runner (kit `t6-publish.mjs` `retryableFailure` and `uploadAll`, tested): only when that attempt's
+     own CLI output shows `fetch failed` or a 5xx answer to `add` or `dag/import`; at most 3 tries in all, 2 and 4
+     minutes apart; every failed attempt kept in `uploads.json` (`retries`); a 4xx, a root or CID mismatch, a readback
+     timeout or a third failure still stops. (2) Concurrency 8 instead of 4, the operator's choice; if a third failure
+     stops it, the operator decides whether to resume at 4.
+   - **Attempt 3 (17:27:57Z-20:38:25Z, concurrency 8): every root uploaded and read back.** 354 of 354 (the 29 earlier
+     kept); 17 failed attempts retried, every one recovered on its second try (16 `fetch failed` at the 30-minute
+     timeout on a tables import, 12 County and 4 Property Improvement; 1 `HTTP 500` on `dag/import`); no failure. Full
+     Filebase pin check: 3,283 of 3,283 CIDs pinned, the 8 controls unpinned.
+   - **Stopped at the gateway sample (20:39:24Z-21:04:18Z; the rule "if 4everland can't serve the roots, stop").** The
+     first 5 archive roots (raw) and the first 5 parts (full bytes) per gateway, 10 minutes per object:
+     `gateway.pinata.cloud` 10 of 10 match on the first try; `4everland.io` 2 match (1 root on its 3rd try, 1 part on
+     its 6th), 8 unverified with `504` after 4 tries each, 0 mismatches. cid.contact lists 4-6 provider records for every
+     sampled root, so the blocks are announced; 4everland's own retrieval times out. Not run: the full gateway checks,
+     the Pinata pins, the manifest. (A hand-off probe also showed `ipfs.filebase.io` answering `429` after about 100
+     requests in a minute.)
+   - **The operator's decision (9). Recommended: (γ).** (γ) Replace 4everland with `https://ipfs.filebase.io`: README.md:69
+     asks for two independent public gateways this environment does not operate, and Filebase's and Pinata's gateways
+     are two companies' public gateways, neither run by us; the earlier exclusion of Filebase as the host was ours, not
+     the README's. Pinata's checks still run before its pins, so one of the two proves retrieval from the network. The
+     4everland sample stays in the record as informational. About 1-2 h unattended (Filebase's 429s are retried no
+     sooner than `Retry-After`), then the pins (at most 45 minutes) and the manifest. (β) Keep 4everland, re-run the
+     10-object sample in a few hours and the full check only if it passes: uncertain, and 8 of 10 failed for 10 minutes
+     today. (α) Run the full check on 4everland now with its 20-minute deadline per object: at today's rate most of
+     3,285 rows would end unverified, after many hours.

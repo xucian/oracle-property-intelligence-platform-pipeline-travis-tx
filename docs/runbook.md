@@ -511,29 +511,30 @@ decisions.md section 27 explains attempt 1's deviations and rules on them; point
 
 </details>
 
-## 8. T6 — publication, run 1 (stopped at the upload, attempt 2)
+## 8. T6 — publication, run 1 (uploaded; stopped at the gateway sample)
 
-Ruled 2026-10-19 (decisions.md 28.6, the operator's go D; 28.7, go a): the 177 shard archives as they are, no Atlas PR,
-gateways `https://4everland.io` and `https://gateway.pinata.cloud`, the CLI's fetch timeout at 30 minutes. Every
-pre-upload check passed; 29 of 354 roots are uploaded and read back; attempt 2 stopped on a Filebase `502 Bad Gateway`
-(decisions.md 28.7). These checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (8).
+Ruled 2026-10-19 (decisions.md 28.6-28.7; the operator's goes D, a and i): the 177 shard archives as they are, no
+Atlas PR, the CLI's fetch timeout at 30 minutes, a bounded retry for 5xx and network errors, 8 uploads in flight. All
+354 roots are uploaded with readback and Filebase pins every CID; the 4everland sample failed (decisions.md 28.7).
+These checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (9).
 
-1. **The pre-upload checks and both upload attempts** (the kit's evidence record). Pass: the line below.
+1. **Upload, Filebase pins and the gateway sample** (the kit's evidence record). Pass: the line below.
    ```bash
    cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-   jq -c '{status, checks: (.pre_upload_checks | {verify: .verify.status, problems: (.car_records.problems | length), import_roots_equal: .import_test.roots_equal, tables_cars: .tables_cars.cars, distinct_bytes: .sizes.distinct_bytes}), attempts: [.upload.attempts[] | {attempt, read_back, failed: [.failures[] | "\(.group) \(.shard) \(.kind)"]}], read_back: (.upload.read_back | length), remaining: .upload.remaining}' docs/evidence/travis-t6-publication-20261018T143520Z.json
+   jq -c '{status, read_back: (.upload.read_back | length), attempt_3: (.upload.attempts[2] | {concurrency, failures: (.failures | length), retried_attempts, max_attempt}), filebase: (.filebase_pins | {pinned, cids, controls_pinned}), sample: (.gateway_sample.per_gateway | map_values({match, unverified, mismatch}))}' docs/evidence/travis-t6-publication-20261018T143520Z.json
    ```
-2. **The 29 read-back roots are served by Filebase's public gateway** (public HTTP, about 30 seconds). Pass: `29 200`.
+2. **Ten read-back roots served by Filebase's public gateway** (public HTTP, one per second; Filebase answers `429` to
+   bursts). Pass: `10 200`.
    ```bash
-   for c in $(jq -r '.upload.read_back[].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; done | sort | uniq -c
+   for c in $(jq -r '.upload.read_back[:10][].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; sleep 1; done | sort | uniq -c
    ```
 
-Then choose decisions.md 28.7 decision (8).
+Then choose decisions.md 28.7 decision (9).
 
 <details>
 <summary>Full expected output</summary>
 
-1. `{"status":"stopped at the Filebase upload, attempt 2 (decisions.md 28.7)","checks":{"verify":"verified","problems":0,"import_roots_equal":true,"tables_cars":177,"distinct_bytes":10033187419},"attempts":[{"attempt":1,"read_back":10,"failed":["county s0001 tables","county s0002 tables","county s0004 tables","property_improvement s0001 tables"]},{"attempt":2,"read_back":29,"failed":["county s0008 tables"]}],"read_back":29,"remaining":325}`
-2. `  29 200`
+1. `{"status":"uploaded with readback; stopped at the 4everland gateway sample (decisions.md 28.7)","read_back":354,"attempt_3":{"concurrency":8,"failures":0,"retried_attempts":17,"max_attempt":2},"filebase":{"pinned":3283,"cids":3283,"controls_pinned":0},"sample":{"https://gateway.pinata.cloud":{"match":10,"unverified":0,"mismatch":0},"https://4everland.io":{"match":2,"unverified":8,"mismatch":0}}}`
+2. `  10 200`
 
 </details>
