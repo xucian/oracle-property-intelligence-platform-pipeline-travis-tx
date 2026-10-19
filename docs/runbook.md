@@ -511,32 +511,29 @@ decisions.md section 27 explains attempt 1's deviations and rules on them; point
 
 </details>
 
-## 8. T6 — publication, run 1 (stopped at step 0)
+## 8. T6 — publication, run 1 (stopped at the upload)
 
-T6 stopped before anything was built, uploaded, pinned or registered: Atlas registers one archive per county per data
-group, and run 1 has 177 (decisions.md section 28). These checks prove the stop and its two facts; nothing reruns and
-nothing is written. Then rule decisions.md 28.3 (A, B, C or D) and 28.4 (the two gateways).
+Ruled 2026-10-19 (decisions.md 28.6, the operator's go D): the 177 shard archives as they are, no Atlas PR, gateways
+`https://4everland.io` and `https://gateway.pinata.cloud`. Every pre-upload check passed; the Filebase upload read back
+10 roots and stopped when 4 tables uploads hit Node's 300 s fetch timeout (decisions.md 28.7). These checks prove that
+state; nothing reruns and nothing is written. Then choose 28.7 (a), (b) or (c).
 
-1. **Atlas's registration format** (public HTTP): one archive per data group, one `{cid, schema, tables}` per group key.
-   Pass: the description line, then `["cid","schema","tables"]`.
-   ```bash
-   curl -s https://raw.githubusercontent.com/elephant-xyz/atlas/main/schema/entry.schema.json | jq -c '.description, .properties.groups.patternProperties[].required'
-   ```
-2. **Run 1's layout and the verify byte total** (in the kit runtime, about 4.5 minutes for the second command). Pass:
-   `{"archives":{"county":89,"property_improvement":88},"tables":177,"cars":354}`, then the verified line below.
+1. **The pre-upload checks and where the upload stopped** (the kit's evidence record). Pass: the line below.
    ```bash
    cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-   jq -c '{archives: ([.cars[] | select(.kind=="archive") | .group] | group_by(.) | map({(.[0]): length}) | add), tables: ([.cars[] | select(.kind=="tables")] | length), cars: (.cars | length)}' data/travis/runs/20261018T143520Z-t5-full/run.json
-   ELEPHANT_SKIP_UPDATE_CHECK=1 node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/node_modules/.bin/elephant-cli --eligibility __ALL__ --label full --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'
+   jq -c '{status, checks: (.pre_upload_checks | {verify: .verify.status, problems: (.car_records.problems | length), import_roots_equal: .import_test.roots_equal, tables_cars: .tables_cars.cars, distinct_bytes: .sizes.distinct_bytes}), read_back: (.upload.read_back | length), failed: [.upload.failures[] | "\(.group) \(.shard) \(.seconds)s"]}' docs/evidence/travis-t6-publication-20261018T143520Z.json
+   ```
+2. **The 10 read-back roots are served by Filebase's public gateway** (public HTTP, about 10 seconds). Pass: `10 200`.
+   ```bash
+   for c in $(jq -r '.upload.read_back[].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; done | sort | uniq -c
    ```
 
-Then rule decisions.md 28.3 and 28.4.
+Then choose decisions.md 28.7 (a), (b) or (c).
 
 <details>
 <summary>Full expected output</summary>
 
-1. `"The current state of one county: one archive per data group. History lives in git."` then `["cid","schema","tables"]`
-2. `{"archives":{"county":89,"property_improvement":88},"tables":177,"cars":354}` then
-   `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28609472173},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`
+1. `{"status":"stopped at the Filebase upload (decisions.md 28.7)","checks":{"verify":"verified","problems":0,"import_roots_equal":true,"tables_cars":177,"distinct_bytes":10033187419},"read_back":10,"failed":["county s0001 315s","county s0002 315s","county s0004 313s","property_improvement s0001 309s"]}`
+2. `  10 200`
 
 </details>

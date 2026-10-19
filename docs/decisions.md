@@ -1742,5 +1742,55 @@ Pinata call). The full verification ran (read-only) and its byte total is record
    28,428,041,013 lost increments across the concurrent shard checks), capture 0 mismatches, loader state equal, `run.json`
    equal. Runbook section 7's expected line now carries this total.
 
-**Open:** the operator rules on point 3 (A, B, C or D; with A also the validate question) and on point 4. Nothing of
-T6 is built or published.
+6. **Ruled (2026-10-19; the oracle's ruling, the operator's go "go D").** The README is the rule; the kit's
+   conventions bend where the README does not require them.
+   - **28.3: D.** The README never names Atlas (lines 9, 57-70 ask for CIDs, a manifest, CARs and two-gateway
+     retrieval), so run 1 is published as the 177 shard archives as they are: no merge, no Atlas PR. A (merging) only if
+     Atlas registration ever becomes required; C (the multi-archive question to the maintainers) is in
+     `docs/OPTIONAL-WORK.md`, not sent.
+   - **28.4: `https://4everland.io` and `https://gateway.pinata.cloud`** (README.md:69: two independent public gateways
+     this environment does not operate). Probed 2026-10-19 with a pilot CID: `trustless-gateway.link` 521/522/525
+     (Cloudflare origin errors), `ipfs.io`, `dweb.link`, `w3s.link`, `nftstorage.link` 429 or 52x,
+     `gateway.lighthouse.storage` 402, `gw3.io` wrong bytes; only 4everland, Pinata and Filebase served the right bytes.
+     Filebase is excluded as the host. The gateway checks run before the Pinata pins, so Pinata's gateway fetches from
+     the network rather than from its own pin.
+   - **Check scope** (README.md:69, "each listed CID ... bytes match the manifest size/digest"): the raw root block of
+     every archive root, tables root and schema against its multihash (their manifest size and sha256 are that block's,
+     as in the pilot) and the full bytes of every table part against its size and sha256. Full bytes on the demo
+     artifact only would not meet line 69: a part's manifest digest is the whole file, not its root block.
+   - **CARs** (README.md:68 and 70, "in the repository or demo packet"): every archive CAR and a full CAR per tables
+     root are listed in the manifest by release-asset name, size, sha256 and root CID, as assets of a GitHub Release of
+     this repository; they are not uploaded as file CIDs (that would put about 10 GB per gateway under line 69's check).
+     Creating the release is a separate go at submission.
+   - **Pinata** pins every archive and tables root by CID (recursive; a tables root's DAG holds its parts), waited on
+     for at most 45 minutes; a refusal or a pending job is recorded with its exact status.
+   - **Run record:** `run.json` stays as T5 left it (its rebuilt-record check stays green); the publication record is
+     separate: kit `docs/evidence/travis-t6-publication-20261018T143520Z.json` (written now, status "stopped"), and,
+     once the publication completes, repository `runs/20261018T143520Z-t5-full.publication.json` with the gateway rows
+     in `runs/20261018T143520Z-t5-full.gateway-checks.json`.
+7. **T6 as run (2026-10-19, kit `bfb3b50`, `3b86fc9`; `t6-publish.mjs`, 6 tests; Travis tests 35 files, 271 passed,
+   1 skipped). Stopped at the Filebase upload.**
+   - **Pre-upload checks, all pass.** Full verify (point 5). The plan re-read all 177 archives: bytes equal to the record,
+     all six recorded CAR checks 0, every tables root points back at its shard's archive, 0 problems. Import test: the
+     largest archive (s0015 Property Improvement, 125,009,886 bytes, 146,786 blocks) `dag import`ed into a scratch Kubo
+     0.43.1 repository offline in 38 s, root equal and pinned recursively; the full tables CAR of the same shard imported
+     beside it and pinned too. Multi-GB import test: moot, no archive is over 125 MB. Full tables CARs: 177, 9,383 blocks,
+     1,427,990,944 bytes, every part equal to its linked CID (built with the CLI's own importer; Kubo computes the same
+     CID). Sizes: archives 8,605,884,174 bytes, parts 1,426,831,183, 10.03 GB distinct (T5's 9.445 GB figure was low),
+     20.07 GB as Filebase counts it of 500 GB, at most 18.64 GB at Pinata of 1 TB.
+   - **Upload (13:14:07Z-13:24:15Z, concurrency 4).** Read back through `https://ipfs.filebase.io`: 7 archive roots
+     (County s0001-s0004, Property Improvement s0001-s0003) and 3 tables roots (County s0003, Property Improvement s0002,
+     s0003). **Failed:** the tables uploads of County s0001, s0002, s0004 and Property Improvement s0001, each with the
+     CLI's `Upload failed: fetch failed` 309-315 s after it started (the three that passed took 22-135 s). Filebase holds
+     every part of all four (read-only `pin/ls`); County s0001's tables root was pinned recursively after the client gave
+     up, the other three roots were not. Cause: Node 22's default fetch headers timeout (300 s) on the CLI's
+     `dag/import?pin-roots=true` of `tables.car`, which sets no timeout of its own; the recursive root pin walks the
+     shard's archive through `county_root` (the double pin of `docs/OPTIONAL-WORK.md`). Nothing else ran: no full
+     Filebase pin check, no gateway check, no Pinata pin, no manifest.
+   - **The operator's decision. Recommended: (a).** (a) Run the CLI under a preload that raises Node's fetch timeouts
+     for the CLI process only (30 minutes; the CLI's code and parameters unchanged), recorded as a deviation, then
+     the same upload command resumes: the 10 read-back roots are kept, the four failed tables are redone (adding a
+     part again is idempotent). About 15 minutes of kit work, then 2-4 h of unattended upload. (b) Rerun as it is and
+     retry failures: no fix, 4 of the first 7 tables imports exceeded the cap. (c) Import `tables.car` without
+     pinning its root: changes what the CLI pins; not recommended. The 10 read-back roots are public on Filebase
+     either way, and they stay valid: their CIDs do not change.
