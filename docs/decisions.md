@@ -1794,3 +1794,24 @@ Pinata call). The full verification ran (read-only) and its byte total is record
      retry failures: no fix, 4 of the first 7 tables imports exceeded the cap. (c) Import `tables.car` without
      pinning its root: changes what the CLI pins; not recommended. The 10 read-back roots are public on Filebase
      either way, and they stay valid: their CIDs do not change.
+   - **Applied: (a), the operator's go "go a" (2026-10-19). Deviation:** the elephant-cli upload process runs with
+     Node's fetch headers and body timeouts at 30 minutes instead of 300 s, through kit
+     `src/counties/travis/cli-fetch-timeout.mjs` preloaded with `NODE_OPTIONS=--import` into that process only
+     (`t6-publish.mjs upload --fetch-timeout-minutes 30`; kit `387a324`, a test proves the preload governs Node's
+     built-in fetch). The CLI's code, version (1.58.1) and parameters are unchanged; no other process gets the preload.
+     The same upload command resumed: the 10 read-back roots were kept, the 4 failed tables uploads redone.
+   - **Attempt 2 (14:11:14Z-14:33:25Z) stopped again, on a different failure.** The 4 tables uploads of attempt 1 went
+     through, and 29 of 354 roots are now read back (15 archives, 14 tables). The 30-minute timeout was needed: County
+     tables imports took 776 s on average (at most 1,177 s; the recursive root pin walks the shard's archive), Property
+     Improvement tables 172 s (at most 349 s), archives 16-50 s. **Failed:** County s0008's tables upload: Filebase answered
+     the CLI's `add` of `tables/geometry/part-00000.parquet` with `502 Bad Gateway` (nginx), at 14:27:45Z; the CLI has no
+     retry. The two uploads in flight finished; nothing new started. Still not run: the full Filebase pin check, the
+     gateway checks, the Pinata pins, the manifest.
+   - **The operator's decision (8). Recommended: (i).** (i) A bounded retry per upload in the runner, only for a CLI
+     failure that is a 5xx answer or a network error (`fetch failed`): up to 3 attempts, 2 and 4 minutes apart, every
+     attempt kept in the log and the record; a CID mismatch, a 4xx or a third failure still stops. The uploads are
+     content-addressed and idempotent (adding a part again returns its CID, importing a CAR again re-pins the same root),
+     so a retry cannot change a published CID. About 10 minutes of kit work. (ii) Keep stopping and resume by hand after
+     each transient error: at 1 error in about 33 uploads, about 10 more stops over the remaining 325. Either way the
+     remaining upload is about 23 h of uploads in sequence, about 6 h wall at concurrency 4 (about 3 h at 8, if Filebase
+     takes it; 502s argue for 4), then the gateway checks (about 1 h) and the pins (at most 45 minutes).

@@ -511,29 +511,29 @@ decisions.md section 27 explains attempt 1's deviations and rules on them; point
 
 </details>
 
-## 8. T6 — publication, run 1 (stopped at the upload)
+## 8. T6 — publication, run 1 (stopped at the upload, attempt 2)
 
-Ruled 2026-10-19 (decisions.md 28.6, the operator's go D): the 177 shard archives as they are, no Atlas PR, gateways
-`https://4everland.io` and `https://gateway.pinata.cloud`. Every pre-upload check passed; the Filebase upload read back
-10 roots and stopped when 4 tables uploads hit Node's 300 s fetch timeout (decisions.md 28.7). These checks prove that
-state; nothing reruns and nothing is written. Then choose 28.7 (a), (b) or (c).
+Ruled 2026-10-19 (decisions.md 28.6, the operator's go D; 28.7, go a): the 177 shard archives as they are, no Atlas PR,
+gateways `https://4everland.io` and `https://gateway.pinata.cloud`, the CLI's fetch timeout at 30 minutes. Every
+pre-upload check passed; 29 of 354 roots are uploaded and read back; attempt 2 stopped on a Filebase `502 Bad Gateway`
+(decisions.md 28.7). These checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (8).
 
-1. **The pre-upload checks and where the upload stopped** (the kit's evidence record). Pass: the line below.
+1. **The pre-upload checks and both upload attempts** (the kit's evidence record). Pass: the line below.
    ```bash
    cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-   jq -c '{status, checks: (.pre_upload_checks | {verify: .verify.status, problems: (.car_records.problems | length), import_roots_equal: .import_test.roots_equal, tables_cars: .tables_cars.cars, distinct_bytes: .sizes.distinct_bytes}), read_back: (.upload.read_back | length), failed: [.upload.failures[] | "\(.group) \(.shard) \(.seconds)s"]}' docs/evidence/travis-t6-publication-20261018T143520Z.json
+   jq -c '{status, checks: (.pre_upload_checks | {verify: .verify.status, problems: (.car_records.problems | length), import_roots_equal: .import_test.roots_equal, tables_cars: .tables_cars.cars, distinct_bytes: .sizes.distinct_bytes}), attempts: [.upload.attempts[] | {attempt, read_back, failed: [.failures[] | "\(.group) \(.shard) \(.kind)"]}], read_back: (.upload.read_back | length), remaining: .upload.remaining}' docs/evidence/travis-t6-publication-20261018T143520Z.json
    ```
-2. **The 10 read-back roots are served by Filebase's public gateway** (public HTTP, about 10 seconds). Pass: `10 200`.
+2. **The 29 read-back roots are served by Filebase's public gateway** (public HTTP, about 30 seconds). Pass: `29 200`.
    ```bash
    for c in $(jq -r '.upload.read_back[].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; done | sort | uniq -c
    ```
 
-Then choose decisions.md 28.7 (a), (b) or (c).
+Then choose decisions.md 28.7 decision (8).
 
 <details>
 <summary>Full expected output</summary>
 
-1. `{"status":"stopped at the Filebase upload (decisions.md 28.7)","checks":{"verify":"verified","problems":0,"import_roots_equal":true,"tables_cars":177,"distinct_bytes":10033187419},"read_back":10,"failed":["county s0001 315s","county s0002 315s","county s0004 313s","property_improvement s0001 309s"]}`
-2. `  10 200`
+1. `{"status":"stopped at the Filebase upload, attempt 2 (decisions.md 28.7)","checks":{"verify":"verified","problems":0,"import_roots_equal":true,"tables_cars":177,"distinct_bytes":10033187419},"attempts":[{"attempt":1,"read_back":10,"failed":["county s0001 tables","county s0002 tables","county s0004 tables","property_improvement s0001 tables"]},{"attempt":2,"read_back":29,"failed":["county s0008 tables"]}],"read_back":29,"remaining":325}`
+2. `  29 200`
 
 </details>
