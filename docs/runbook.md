@@ -380,7 +380,8 @@ pinned or registered (T6). Measured on the dry run: about 14.5 hours on this mac
    counts as an interruption, see below).
 2. `sysctl vm.swapusage` → `used` well under half of `total`. The run warns above half or 4 GB, and a nearly full swap
    doubled the County time in T4 (decisions.md 25.9). If `used` stays high after quitting apps, restart the Mac.
-3. `df -h /Users/luti` → at least 160 GB available (the run writes about 125 GB).
+3. `df -h /Users/luti` → at least 180 GB available for a new full run (the run writes about 126 GB; run 2 with T6 and a T7
+   rebuild needs the rest, decisions.md 27.18).
 
 The run repeats these checks at its start as warnings (`[t5] preflight warning: …`) and starts anyway.
 
@@ -413,33 +414,42 @@ failed (…)` is resumed the same way, after fixing the cause named in `failures
 `--new`: that starts the run over in a new directory.
 
 Once the run is finished, the same command no longer starts or resumes anything (kit `6107969`). It verifies the
-finished run read-only, in about 5 seconds, prints `"status":"verified"` and exits 0. A new run needs `--new` (T10).
-`--reopen` reruns a finished run in place, for a fix such as decisions.md 27.9; only stages whose inputs changed run, and
-`run.json` is rewritten with a new attempt.
+finished run read-only, in about 6 seconds, prints `"status":"verified"` and exits 0.
+- A new run needs `--new` (T10).
+- `--reopen` reruns a finished run in place; only the stages whose inputs changed run.
+- `--rerun-shards s0039,s0040,…` (kit `1cf6ed1`, decisions.md 27.14) reruns only the named shards. Every other shard is
+  re-certified in place, or the run stops and names the shard it cannot re-certify. The kit must be committed first. A
+  scoped rerun that stops resumes with the same command.
 
-The runner exits by itself after `done`, a failure or a signal. If Node's own teardown stalls, as it did once after the
-full run, the log ends with
-`[t5] exit watchdog: pid <n> is still alive 30 s after it exited with code 0 (…); sending SIGTERM`. Everything was written
-before that line.
+The runner exits by itself after `done`, a failure or a signal. Node's own teardown has stalled twice, after both
+attempts of the full run. When it does, the log ends with
+`[t5] exit watchdog: pid <n> is still alive 30 s after it exited with code 0 (…); sending SIGTERM` and, if needed,
+`… sending SIGKILL`. Everything was written before those lines.
 
-### What "done" printed (run `20261018T143520Z-t5-full`, 2026-10-19 03:14:36Z)
+### What "done" printed (run `20261018T143520Z-t5-full`)
+
+Attempt 1 (the full run, 2026-10-19 03:14:36Z):
 
 ```
 {"travis_t5_run":"20261018T143520Z-t5-full","status":"finished","seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390210,"wall_h":12.23,"run_record":"data/travis/runs/20261018T143520Z-t5-full/run.json"}
+```
+
+Attempt 2 (the scoped rerun of decisions.md 27.9 and 27.10, 2026-10-19 09:02:39Z, about 1 h 55 min). Its `wall_h` spans
+both attempts and the gap between them; `last_attempt_h` is the rerun:
+
+```
+{"travis_t5_run":"20261018T143520Z-t5-full","status":"finished","seed":441961,"ready":441939,"dead":22,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390212,"wall_h":17.89,"last_attempt_h":1.33,"scoped_rerun":{"shards":["s0039","s0040","s0066","s0067","s0068","s0081","s0084"],"recertified":{"shards":82,"stages":{"link":1,"appraisal":82,"permits":82}}},"run_record":"data/travis/runs/20261018T143520Z-t5-full/run.json"}
 [t5] done: data/travis/runs/20261018T143520Z-t5-full/run.json
 ```
 
-Phase A expected 25 dead and 356 CARs. decisions.md section 27 explains both.
-- **Dead.** The 25 roll rows without a situs street, plus 12 county-line accounts that the adapter's rounded bounding
-  box refused. The 12 are a pipeline defect, open as 27.9. Three of the 25 print the street in shifted columns, open as
-  27.10.
-- **CARs.** Shard s0089 has no Property Improvement group: none of its accounts holds a linked permit.
-- **Exit.** The process did not exit after `done`. That is fixed in kit `6107969`.
+decisions.md section 27 explains attempt 1's deviations and rules on them; points 12-18 record attempt 2.
+- **Dead.** The 22 that remain are roll rows with no situs street, a source fact.
+- **CARs.** There are 354, not 356: shard s0089 has no Property Improvement group, because none of its accounts holds a
+  linked permit.
 
-### Post-run checklist (about 10 minutes, offline, in the kit runtime; nothing reruns the 12 hours)
+### Post-run checklist (about 10 minutes, offline, in the kit runtime; nothing reruns)
 
-Run every step in one terminal; it never needs the VPN. First stop the old runner: the coordinator does this with you,
-as `kill 15367`, then `kill -9 15367` if it is still there after 5 seconds. Its `caffeinate` (15384) ends with it.
+Run every step in one terminal; none needs the VPN.
 
 ```bash
 cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
@@ -448,33 +458,35 @@ R=data/travis/runs/20261018T143520Z-t5-full
 ```
 
 1. **No runner left:** `pgrep -lf t5-run.mjs` → no output.
-2. **Resume is a no-op** (about 5 seconds):
+2. **Resume is a no-op** (about 6 seconds):
    ```bash
    STAMP=$(mktemp); sleep 1; t5 | tail -1 | jq -c '{status, mode, stages_checked, outputs_checked, run_json, mismatch_count, wrote, counts}'; find $R data/travis/loader/full -maxdepth 3 -newer "$STAMP" | wc -l; ls data/travis/runs | grep -c -- '-t5-full$'
    ```
    It prints three lines. The first is
-   `{"status":"verified","mode":"quick","stages_checked":1157,"outputs_checked":1688,"run_json":"equal","mismatch_count":0,"wrote":"nothing","counts":{"seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390210}}`.
+   `{"status":"verified","mode":"quick","stages_checked":1157,"outputs_checked":1688,"run_json":"equal","mismatch_count":0,"wrote":"nothing","counts":{"seed":441961,"ready":441939,"dead":22,"invalid":0,"reconciles":true,"shards":89,"cars":354,"permits_published":1986484,"roof_age_eligible":390212}}`.
    Then `0`: nothing was written where the runner writes when it starts a stage. Then `1`: no new run directory.
-3. **Every output re-hashed** (about 5 minutes):
+3. **Every output re-hashed** (about 4 minutes):
    `t5 --verify | tail -1 | jq -c '{status, outputs_rehashed, capture, loader: .loader.state_sha256_matches, run_json}'`
-   → `{"status":"verified","outputs_rehashed":{"files":683895,"bytes":28334269318},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`.
+   → `{"status":"verified","outputs_rehashed":{"files":683910,"bytes":28544896999},"capture":{"ok":true,"mismatches":0},"loader":true,"run_json":"equal"}`.
 4. **Reconciliation** (about 75 seconds):
-   `node --max-old-space-size=12288 src/counties/travis/t5-reconcile.mjs --run $R | jq -c '{all_checks_pass, dead, dead_shards: (.dead_shards | length), s0089: .shards_without_property_improvement.s0089, sizes: .sizes_gb.total, anchors: .roof_age_anchors, limitations_missing}'`
-   → `{"all_checks_pass":true,"dead":{"no_situs_street:nothing_printed":21,"outside_validation_bbox":12,"no_situs_street:number_only":1,"no_situs_street:columns_shifted":3},"dead_shards":23,"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":4}`.
-   Add `--out <file>` for the whole report: every dead account with its seed facts and metres past the box, the geo_ids
-   of s0089, the sizes per group, and the limitations recomputed.
-5. **The 37 dead as the Loader tombstoned them:**
-   `jq -r '.evidence | sub("coordinate .* is"; "coordinate … is")' data/travis/loader/full/generations/20261018T143520Z-t5-full/tombstones.jsonl | sort | uniq -c`
-   → `12 coordinate … is outside the Travis bbox` and
-   `25 no situs address: the roll prints no situs street for this account`.
+   `node --max-old-space-size=12288 src/counties/travis/t5-reconcile.mjs --run $R | jq -c '{all_checks_pass, failed_checks, dead, dead_shards: (.dead_shards | length), rulings, s0089: .shards_without_property_improvement.s0089, sizes: .sizes_gb.total, anchors: .roof_age_anchors, limitations_missing}'`
+   → `{"all_checks_pass":true,"failed_checks":[],"dead":{"no_situs_street:nothing_printed":21,"no_situs_street:number_only":1},"dead_shards":17,"rulings":{"county_line":{"accounts":12,"ready":12},"situs_columns_shifted":{"seed_rows_matching":3,"ready":3,"sidecar_flagged":3}},"s0089":{"accounts":1961,"linked":0,"permits_printing_a_geo_id":618,"their_link_state":{"multiple_candidates":618},"every_printed_geo_id_is_shared":true},"sizes":{"car":8.606,"blocks":8.017,"parts":1.427,"distinct":9.445,"filebase_counted":18.889},"anchors":{"t4_rule":108733,"estimator":108800,"only_estimator":69,"only_t4_rule_dead":2},"limitations_missing":0}`.
+   Add `--out <file>` for the whole report: every dead account with its seed facts, the 12 county-line and 3
+   shifted-situs accounts with their state, the geo_ids of s0089, the sizes per group, and the limitations recomputed.
+5. **The 22 dead as the Loader tombstoned them:**
+   `jq -r .evidence data/travis/loader/full/generations/20261018T143520Z-t5-full/tombstones.jsonl | sort | uniq -c`
+   → `22 no situs address: the roll prints no situs street for this account`.
 6. **The run record:**
-   `jq -c '{appraisal: (.counts.appraisal | {seed, ready, dead, invalid, reconciles}), cars: ([.cars[] | "\(.group)/\(.kind)"] | group_by(.) | map({(.[0]): length}) | add), car_errors: ([.cars[] | select(.kind == "archive") | .car_validation | to_entries[] | select(.key | endswith("_errors")) | .value] | add), published: .counts.permits.published, roof_age: .roof_age.by_basis, tombstones: .tombstones_consumed, history: (.run_history | length)}' $R/run.json`
-   → `{"appraisal":{"seed":441961,"ready":441924,"dead":37,"invalid":0,"reconciles":true},"cars":{"county/archive":89,"county/tables":89,"property_improvement/archive":88,"property_improvement/tables":88},"car_errors":0,"published":1986484,"roof_age":{"new_construction":96601,"year_built":281410,"none":51714,"completed_replacement":12199},"tombstones":{"dead":37,"invalid":0},"history":1}`.
-7. **The repository's run record is the run's:**
+   `jq -c '{appraisal: (.counts.appraisal | {seed, ready, dead, invalid, reconciles}), cars: ([.cars[] | "\(.group)/\(.kind)"] | group_by(.) | map({(.[0]): length}) | add), car_errors: ([.cars[] | select(.kind == "archive") | .car_validation | to_entries[] | select(.key | endswith("_errors")) | .value] | add), published: .counts.permits.published, roof_age: .roof_age.by_basis, tombstones: .tombstones_consumed, deltas: .deltas.appraisal | {new, unchanged}, limitations: (.limitations | length), history: (.run_history | length)}' $R/run.json`
+   → `{"appraisal":{"seed":441961,"ready":441939,"dead":22,"invalid":0,"reconciles":true},"cars":{"county/archive":89,"county/tables":89,"property_improvement/archive":88,"property_improvement/tables":88},"car_errors":0,"published":1986484,"roof_age":{"new_construction":96601,"year_built":281412,"none":51727,"completed_replacement":12199},"tombstones":{"dead":22,"invalid":0},"deltas":{"new":15,"unchanged":441924},"limitations":20,"history":2}`.
+7. **The scoped rerun's proof** (decisions.md 27.14-27.15):
+   `jq -c '.scoped_reruns[0] | {shards, kit_commit_at_run, recertified, proofs: [.code_changes[] | "\(.proof):\(.holds)"], earlier_parcels_unchanged: ([.comparisons[].appraisal.unchanged] | add), identical: ([.comparisons[] | .appraisal.identical and .permits.identical] | all), newly_ready: ([.comparisons[].appraisal.newly_ready | length] | add)}' $R/run.json; grep -l '"recertified"' $R/shards/*/*.done.json $R/global/*.done.json | wc -l`
+   → `{"shards":["s0039","s0040","s0066","s0067","s0068","s0081","s0084"],"kit_commit_at_run":"962f851","recertified":{"shards":82,"stages":{"link":1,"appraisal":82,"permits":82}},"proofs":["link_stage_unchanged:true","situs_columns_branch:true","validation_box_widened:true"],"earlier_parcels_unchanged":34984,"identical":true,"newly_ready":15}`,
+   then `165`.
+8. **The repository's run record is the run's:**
    `shasum -a 256 $R/run.json /Users/luti/dev/oracle-property-intelligence-platform-pipeline-travis-tx/runs/20261018T143520Z-t5-full.json`
-   → the same `a0732ed3e34bf404918dda792150a06e44c4173835a4517a0d257b8fc0a27afb` twice.
-8. **Readiness:** `python3 ../scripts/validate-county-readiness.py docs/travis-sources.yaml | jq -r .overall` → `PASS`.
-9. **Tests:** `npx vitest run tests/travis-*` → `Test Files 33 passed (33)` and `Tests 248 passed (248)`.
+   → the same `15a43cb8f6ac0b4f46306106f6d59d8a903a02898474dc2060f2a2943bd3fc2b` twice.
+9. **Readiness:** `python3 ../scripts/validate-county-readiness.py docs/travis-sources.yaml | jq -r .overall` → `PASS`.
+10. **Tests:** `npx vitest run tests/travis-*` → `Test Files 34 passed (34)` and `Tests 265 passed (265)`.
 
-Then rule decisions.md 27.9–27.11. If you take 27.9 A, the agent builds the scoped rerun and you run it (about 1.5
-hours), then repeat steps 2–7 with the new numbers. Otherwise say "T5 approved".
+Then say "T5 approved". Before T6, free the disk decisions.md 27.18 asks for: at least 50 GiB.

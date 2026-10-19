@@ -1335,7 +1335,10 @@ it with the one command of runbook section 7. Evidence: kit `docs/evidence/travi
    Several structures per property stay out of v1: the lexicon reaches them only through building layouts
    (`property_has_layout` → `layout_has_structure`), not a pre-run fix.
 
-## 27. 2026-10-19: T5 phase B — the full run reconciled, three deviations explained, three points open
+## 27. 2026-10-19: T5 phase B — the full run reconciled, three deviations explained, three points ruled and applied
+
+The operator ruled points 9-11 on 2026-10-19. Points 12-18 record what was applied: the scoped rerun is attempt 2 of
+the same run. Points 1-8 are the phase B record of attempt 1, as written then.
 
 The full run `20261018T143520Z-t5-full` (kit `962f851`, CLI 1.58.1, lexicon manifest `7084b933…` at start and end) was
 started on 2026-10-18 at 14:35:20Z by the coordinator at the operator's request and printed `done` at 2026-10-19
@@ -1408,6 +1411,13 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
    gains the four items with the fix of point 9, which rewrites `run.json`, or at the latest when T6 writes the
    published record.
 
+   **Applied 2026-10-19 (point 16).** The 12 and the 3 are published. The record lists 20 limitations. The two new ones:
+   - the 22 accounts with no situs street (`no_situs_street`);
+   - the 39 permits (6 roofing) on 2 dead accounts (`linked_to_dead_account`).
+
+   The roofing item now reads 35,463 roofing permits shown on no property. Of these, 35,457 link to no property and 6
+   sit on dead accounts. The reconciliation finds nothing missing.
+
 **Deviations, explained:**
 
 8. **37 dead, not 25.** Every one is a permanent failure in the appraisal stage, from the transform's own guards. None
@@ -1464,7 +1474,7 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
      - The estimate of 25.9 was 8.76 and 17.51 GB. County grew 17% with transform v4's extras (structure, lot, tax,
        geometry parts); Property Improvement is 1% under.
 
-**Open for the operator:**
+**Ruled by the operator (2026-10-19):**
 
 9. **The 12 accounts the bounding box refused** (a pipeline defect). The fix: the adapter validates against the
    wider box the seed builder already uses (29.95–30.75 N, −98.25 to −97.30 W). That box contains every TNR centroid
@@ -1497,6 +1507,11 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
 
    Recommended: **A**. The first publication then holds every account TCAD appraises and the TNR layer draws, and
    only 7 County roots change before anything is published.
+
+   **Ruled 2026-10-19 (operator): option A approved.** The guard may use the wider seed box or, better if it is cheap
+   and proven, the county boundary; it must never accept geometry that is genuinely outside Travis. Only the affected
+   shards rerun. The others are re-certified in place without recomputing them: their marker input digests must still
+   match, or the code change must be proven not to reach them. Tests for both. Applied: points 12, 14 and 15.
 10. **The 3 accounts whose street is printed one column to the right:**
     - 954255: `E` / `PARMER` / `LN` in prefix, suffix and unit;
     - 978103 and 978104: `PINNACLE` / `CV` in suffix and unit.
@@ -1509,9 +1524,153 @@ registered. Evidence: kit `docs/evidence/travis-t5-run-20261018T143520Z.json` (t
     - **(ii) Keep them dead** as a source data-entry defect, listed with proof.
 
     Recommended: **(i)**. Under the README rule, data is missing only where the source lacks it, and here it does not.
+
+    **Ruled 2026-10-19 (operator): (i) approved**, for exactly the pattern of 954255 and 978103/978104 and nothing
+    broader, with tests, run together with 9 A. Applied: point 13.
 11. **Disk.** 44 GiB of 1.8 TiB was free after the run (98% used). The run directory takes 125.8 GB allocated and the
     Loader 2.5 GB. Phase B's 60-parcel exit probe left 3.4 GB in the session scratchpad, now 42 GiB free.
     - T6 (upload) and point 9 A fit in that space.
     - Run 2 (T10) writes about as much as run 1 again. Before T10, free at least 160 GB or move `data/` to a larger
       volume. The agent deletes nothing.
     - Recommended: decide before T10; it does not block T6.
+
+    **Ruled 2026-10-19 (operator):** the operator diagnoses the disk separately. Free space is checked before the rerun,
+    which stops if under 25 GiB. T6, T7 and T10 needs are reported for planning. Applied: points 15 and 18.
+
+**Applied (2026-10-19; kit `1cf6ed1` and `2c2d129`; attempt 2 of the same run):**
+
+12. **The guard (27.9).** `TRAVIS_VALIDATION_BBOX` is now the seed builder's box: 29.95-30.75 N, -98.25 to -97.30 W.
+    - None of the roll's 373,513 TNR geometries (7,053,937 points) has a point outside it.
+    - It contains the contract box, so it refuses nothing that passed before.
+    - The other identity checks still keep a wrong-county record out: seed county and FIPS, source hosts, request
+      identifiers and address state.
+
+    The county boundary was weighed and not taken, because it is not cheap and not proven here. The check used the
+    Census TIGERweb county polygon (GEOID 48453, 1,955 vertices, SHA-256 `1656dd6d…`, a scratch download, never a
+    record's source). Against the roll:
+    - 653 TNR centroids lie outside the Census line;
+    - 56 accounts lie wholly outside it, by up to 46 m;
+    - parcel points cross it by up to 2.35 km (355656);
+    - 7 of the 12 have their centroid outside it.
+
+    TCAD's parcel fabric does not follow that line. An exact boundary test would refuse 56 published accounts TCAD
+    appraises, and any tolerance would have to be calibrated on the data. Tests:
+    - the box equals the seed box and contains the contract box;
+    - each of the 12 refusing points now passes;
+    - points outside the box still fail.
+13. **The shifted situs columns (27.10).** Situs columns v1 (`transform.mjs` `readShiftedSitusColumns`) reads exactly this
+    pattern:
+    - the street column blank;
+    - one name in the suffix column (letters only, not itself a suffix word);
+    - in the unit column, one of 19 suffix words: the 2-4 letter USPS standard abbreviations TCAD prints as a situs
+      suffix on 1,000 or more accounts.
+
+    The house number and prefix are read as printed. The address stays the printed parts (`E PARMER LN, TX 78753`,
+    `PINNACLE CV, TX 78645`), and the sidecar records the reading (`situs_columns_shifted`). On the roll it matches 954255,
+    978103 and 978104 and no other row. Every other blank street still dies with the run's message.
+
+    Tests cover:
+    - the three patterns and 14 near misses (a real unit such as `A`, `101`, `APT` or `STE`, a suffix word or two
+      words in the suffix column, and others);
+    - the published output;
+    - the reconciliation class.
+
+    A side-by-side test runs the run's transform (`962f851`) on rows with a street and gets the same bytes.
+14. **The scoped rerun option** (`t5-run.mjs --rerun-shards <ids>`, `t5-recertify.mjs`, kit `1cf6ed1`). It reruns the
+    named shards of a finished run in place. It re-certifies every other marker whose input changed only through its
+    code digest: it rewrites the marker with the new input and keeps the old input digest under `recertified`.
+
+    Nothing is assumed. Each changed file needs a text proof against the run's kit commit:
+    - `validate.mjs`: only the box declaration changed, and the new box contains the old;
+    - `transform.mjs`: the run's text plus delimited `travis-situs-columns-v1` blocks and one guard condition;
+    - `t5-run.mjs`: the plan and link stages are byte for byte the run's.
+
+    Each shard needs its own facts:
+    - no refusal by the guard, and no permit-group failure;
+    - every blank-street row dead with the run's evidence and outside the pattern.
+
+    Its outputs are re-hashed (every parcel's `data/` and permit-directory digest). No marker is re-certified until each
+    rerun shard shows that its earlier parcels came out the same. Anything else stops the run and names the shard.
+
+    The kit must be committed (the record names the commit). Tests:
+    - the proofs on synthetic texts, and on the real texts against `962f851`;
+    - the shard facts;
+    - a scoped rerun end to end (re-certify, verify quick and full);
+    - a refused shard, a closed gate, and a refusal before anything is written.
+
+    The Travis tests are 34 files, 265 passed; readiness `PASS`.
+15. **The rerun.** On 2026-10-19 from 07:08:37Z, with 36.09 GiB free (above the 25 GiB floor), the start command plus
+    `--rerun-shards s0039,s0040,s0066,s0067,s0068,s0081,s0084`.
+    - **Shards:** 7, the 6 of 27.9 plus s0084 for 27.10 (954255 is in s0081).
+    - **Time:** 1 h 55 min, shard phase 77 minutes.
+      - County validate took 48.5-49.9 minutes per shard, as in the full run.
+      - The Loader finalized at 08:25:22Z.
+      - The record's disk figure took 34 minutes.
+      - The Node teardown stalled again after `done`; the exit watchdog of `6107969` ended it with SIGKILL, everything
+        already written.
+    - **Comparisons:** each rerun shard's earlier parcels came out byte for byte the same (`data/` and sidecar): 34,984 of
+      34,984. The permit states of those parcels were unchanged too. The 15 accounts are newly ready (done with zero
+      permits), and 358348 stays dead.
+    - **Re-certified:** 165 markers, the link pass and the appraisal and permits stages of 82 shards. Their other stages
+      matched as they were.
+    - **Property Improvement:** the CARs came out identical, so their CAR checks and tables are attempt 1's.
+    - **Disk:** the rerun allocated 8.77 GiB: 7.32 GiB of new attempt directories, 1.45 GiB of new Loader files (the
+      permits table is rewritten). Free space fell 17.96 GiB to 18.13 GiB over the same two hours. The other 9.2 GiB
+      went elsewhere on the volume: 25 Time Machine local snapshots by then, and other processes.
+    - Peak memory was 9.8 GB.
+16. **Re-reconciled** (`t5-reconcile.mjs` v2; full `--verify`: 683,910 files, 28.54 GB re-hashed in 240 s, all equal; the
+    quick verification writes nothing; `run.json` equals the record rebuilt from the markers, code basis `1cf6ed1`):
+    - **441,961 = 441,939 ready + 22 dead + 0 invalid.** All 22 are source facts in 17 shards: 21 print no situs part,
+      1 only a house number. The 12 county-line accounts are ready; the 3 shifted ones are ready and flagged.
+    - County: 89 archives, 9,690,099 blocks, 441,939 properties. Property Improvement unchanged: 88 archives,
+      5,398,330 blocks, 237,531 properties. Every CAR's six checks are 0.
+    - Tables: address 883,578; geometry and `parcel_has_geometry` 375,037; `address_has_geometry` 373,497; lot 441,602;
+      sales history 423,983; person 343,966; company 97,673. Permits are unchanged: 1,986,484 published on 237,531
+      parcels (none of the 15 has a linked permit).
+    - Roof age: 441,939 parcels, 390,212 with an age (281,412 from the built year: 355650 and 954255 gain one), 51,727
+      without, 276,668 older than 15 years.
+    - Loader: the second generation of the run. Deltas against the first: appraisal 15 new and 441,924 unchanged;
+      permit groups and permits unchanged; 22 dead tombstones. The replaced generation is kept. Run history: 2.
+    - `run.json` SHA-256 is `15a43cb8…`, copied to `runs/20261018T143520Z-t5-full.json`.
+17. **Roots.** 14 of 354 changed: the County archive and tables roots of the 7 rerun shards. The other 340 are unchanged,
+    as are both CAR digests of all 82 other shards.
+
+    | Shard | County root (new) | County tables root (new) | Blocks |
+    | --- | --- | --- | --- |
+    | s0039 | `baguqeera33wulnc4wnz2vgnipntuhppdwa2fjko3ryoxdxvsdykdhzy7urya` | `baguqeerawlxhcmbjxv6wikvksofilsgl5k2etm6tzhiv2bfd6ssu76safvyq` | 109,971 |
+    | s0040 | `baguqeeraoxwdgtmzzigl34myi34d6rsn3jslsum2j5itdpsbabu7cdpndfbq` | `baguqeerasz5fscgq7yr4x4nst24snrpuqdfthjauf5lnuzmgmd2prktgsb6a` | 112,550 |
+    | s0066 | `baguqeerau5bdszsro66i4kkyr2cpmwjxlkx6ijkjyfh7j4dsnehreoy7badq` | `baguqeeraahn5tak2dr243k6l3yjqyxunezoqf5pekmhdxarofhygkatjmcvq` | 106,992 |
+    | s0067 | `baguqeeraeo7azvxutmv62bxm22pwam3zhenqae5qztpxyakwl7rxom33ekxa` | `baguqeerad3brwg3vnezopkr2plofp2poteb5jzhcuwkpxyppxm5c42nbfkua` | 109,515 |
+    | s0068 | `baguqeeracc6vsrgmqpkgoykjpsv5vd626t4abgfunouu7wzoayogs7axnxra` | `baguqeerald62bnm56mbgxvdqeu66nr46d4yh7dog3dppwnnwqbhsednhxsxa` | 110,472 |
+    | s0081 | `baguqeeramkkib2yjcuqgh5i75yc73d6yuiupgdq6ofkrbp36kda6pe3bdelq` | `baguqeerae3uk5kwqwncwexeekalubaaqtnc2pej4hlrumkdznj576sczj75a` | 102,925 |
+    | s0084 | `baguqeeraoacjaavqkbjkxze2phdysu3uhli42wwxuxhaut4pvkzmsxo52a2q` | `baguqeera3awjgxnbnr6vhh6yu74lcd4exxnoylivvct7ina5vc3arectjenq` | 98,950 |
+
+    The former roots are in the kit record's `before_the_rulings`. Sizes are unchanged to the third decimal: 9.445 GB
+    distinct, 18.889 GB as Filebase counts it.
+18. **Disk for T6, T7 and T10 (27.11).** Free now: 18.13 GiB.
+    - **T6: about 10.1 GB.**
+      - The full-DAG tables CARs that README.md:68 asks for are one per shard and group, 177 in all. Each holds the
+        archive's blocks with their framing, the Parquet parts and the tables index: about 10.0 GB (County 5.35,
+        Property Improvement 4.68).
+      - Upload staging is none: `elephant-cli upload` streams each CAR and part from the run directory and writes only
+        JSON receipts.
+      - Gateway checks and the manifest add under 0.1 GB.
+    - **T7: about 18 GB at peak, 15 GB kept.**
+      - The DuckDB file is about 3.2 GB. A DuckDB 1.5.6 build of 10 sample shards turned 158 MB of parts into 326 MB
+        (x2.07), and a full-text index over their 210,853 permits added 18.6 MB. Scaled: 2.95 + 0.18 + about 0.1 GB of
+        derived tables. That is above section 5's 2 GB ephemeral figure; section 21's image-baked path carries it.
+      - The peak also holds the CID-verified parts if downloaded (1.4 GB), the build's spill (up to 3 GB), the CDK asset
+        copy (3.2 GB) and the image in the colima VM disk (about 7 GB, which does not shrink by itself).
+    - **T10: free at least 180 GB before run 2, or move `data/` to a larger volume** (27.11 said 160):
+      - run 2 itself, about 126 GB;
+      - Loader 1.5 GB;
+      - fresh captures 3.7 GB;
+      - T6 again 10 GB;
+      - a T7 rebuild 18 GB at peak;
+      - 20 GB kept free for swap and local snapshots.
+    - **Targets:** before T6 at least 30 GiB free, before T7 at least 40 GiB, so at least 50 GiB before starting T6.
+      Today T6 would leave about 8.7 GiB, and T7 does not fit.
+    - **Candidates:** the agent deletes nothing. The operator decides on the superseded dry-run directories (about 13.5
+      GB), and the system temp directory holds 12 stale `cdk.out` directories of other projects (19 GB).
+
+**Open:** nothing for T5 beyond the operator's approval. Before T6, the free space of point 18.
