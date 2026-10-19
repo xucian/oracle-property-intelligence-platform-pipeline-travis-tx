@@ -511,30 +511,29 @@ decisions.md section 27 explains attempt 1's deviations and rules on them; point
 
 </details>
 
-## 8. T6 — publication, run 1 (uploaded; stopped at the gateway sample)
+## 8. T6 — publication, run 1 (uploaded; gateway checks stopped on Pinata's quota)
 
-Ruled 2026-10-19 (decisions.md 28.6-28.7; the operator's goes D, a and i): the 177 shard archives as they are, no
-Atlas PR, the CLI's fetch timeout at 30 minutes, a bounded retry for 5xx and network errors, 8 uploads in flight. All
-354 roots are uploaded with readback and Filebase pins every CID; the 4everland sample failed (decisions.md 28.7).
-These checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (9).
+Ruled 2026-10-19/20 (decisions.md 28.6-28.7; the operator's goes D, a, i and γ): the 177 shard archives as they are,
+no Atlas PR; gateways `https://gateway.pinata.cloud` and `https://ipfs.filebase.io`. All 354 roots are uploaded with
+readback, Filebase pins every CID, and the gateway checks stopped on Pinata's hourly `429` (decisions.md 28.7). These
+checks prove that state; nothing reruns and nothing is written. Then choose 28.7 decision (10).
 
-1. **Upload, Filebase pins and the gateway sample** (the kit's evidence record). Pass: the line below.
+1. **Upload, Filebase pins and the gateway checks so far** (the kit's evidence record). Pass: the line below.
    ```bash
    cd /Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime
-   jq -c '{status, read_back: (.upload.read_back | length), attempt_3: (.upload.attempts[2] | {concurrency, failures: (.failures | length), retried_attempts, max_attempt}), filebase: (.filebase_pins | {pinned, cids, controls_pinned}), sample: (.gateway_sample.per_gateway | map_values({match, unverified, mismatch}))}' docs/evidence/travis-t6-publication-20261018T143520Z.json
+   jq -c '{status, read_back: (.upload.read_back | length), retried: .upload.attempts[2].retried_attempts, upload_failures: (.upload.attempts[2].failures | length), filebase: (.filebase_pins | {pinned, cids, controls_pinned}), gateways: .gateway_checks.per_gateway}' docs/evidence/travis-t6-publication-20261018T143520Z.json
    ```
-2. **Ten read-back roots served by Filebase's public gateway** (public HTTP, one per second; Filebase answers `429` to
-   bursts). Pass: `10 200`.
+2. **Ten read-back roots served by Filebase's public gateway** (public HTTP, one per second). Pass: `10 200`.
    ```bash
    for c in $(jq -r '.upload.read_back[:10][].root' docs/evidence/travis-t6-publication-20261018T143520Z.json); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 "https://ipfs.filebase.io/ipfs/$c?format=raw"; sleep 1; done | sort | uniq -c
    ```
 
-Then choose decisions.md 28.7 decision (9).
+Then choose decisions.md 28.7 decision (10).
 
 <details>
 <summary>Full expected output</summary>
 
-1. `{"status":"uploaded with readback; stopped at the 4everland gateway sample (decisions.md 28.7)","read_back":354,"attempt_3":{"concurrency":8,"failures":0,"retried_attempts":17,"max_attempt":2},"filebase":{"pinned":3283,"cids":3283,"controls_pinned":0},"sample":{"https://gateway.pinata.cloud":{"match":10,"unverified":0,"mismatch":0},"https://4everland.io":{"match":2,"unverified":8,"mismatch":0}}}`
+1. `{"status":"uploaded with readback; gateway checks stopped on Pinata's hourly 429 (decisions.md 28.7)","read_back":354,"retried":17,"upload_failures":0,"filebase":{"pinned":3283,"cids":3283,"controls_pinned":0},"gateways":{"https://ipfs.filebase.io":{"raw_match":356,"file_match":235,"unverified":0,"mismatch":0},"https://gateway.pinata.cloud":{"raw_match":250,"file_match":0,"unverified":39,"mismatch":0}}}`
 2. `  10 200`
 
 </details>

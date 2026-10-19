@@ -1841,3 +1841,24 @@ Pinata call). The full verification ran (read-only) and its byte total is record
      10-object sample in a few hours and the full check only if it passes: uncertain, and 8 of 10 failed for 10 minutes
      today. (α) Run the full check on 4everland now with its 20-minute deadline per object: at today's rate most of
      3,285 rows would end unverified, after many hours.
+   - **Applied: (γ), the operator's go "go γ" (2026-10-20).** The two gateways are `https://gateway.pinata.cloud` and
+     `https://ipfs.filebase.io`. Why Filebase was excluded before, and why that was our rule, not the README's: point 6
+     dropped it because Filebase holds the upload, so its gateway serves from its own pins rather than proving retrieval
+     from the network. README.md:69 asks only for "two independent public gateways that this environment does not
+     operate"; Filebase's gateway is public, unauthenticated, run by Filebase, and independent of Pinata's (its own
+     example pair, ipfs.io and dweb.link, came from one operator). The network-retrieval proof is kept on the other
+     gateway: Pinata's checks run before any Pinata pin. The 4everland sample stays in the publication record as
+     informational. Same scope, a 20-minute deadline per object, 4 objects in flight per gateway, 429 and 5xx retried no
+     sooner than `Retry-After`, then one short pass over any row without a definitive answer.
+   - **Stopped at the gateway checks (21:28:24Z-21:39:20Z).** `ipfs.filebase.io`: all 356 roots and schemas and the
+     first 235 parts matched, nothing else yet. `gateway.pinata.cloud`: 250 roots matched in 9 minutes, then `429` with
+     `Retry-After` of about 3,540 s (an hourly quota); the runner gives up on a wait longer than the 20-minute deadline,
+     so 39 rows went unverified, and the chain was stopped by hand rather than send more requests into the window.
+     0 mismatches. Not run: the rest of the checks, the Pinata pins, the manifest.
+   - **The operator's decision (10). Recommended: (1).** (1) Pace Pinata's gateway to its quota: wait out each
+     `Retry-After` in full (up to about an hour) instead of giving up at the deadline, 1 request in flight on Pinata,
+     Filebase unchanged; the scope and the manifest stay as ruled. About 10 minutes of kit work, then about 12-13 h
+     unattended for Pinata's remaining ~3,035 rows (about 250 an hour), then the pins and the manifest. (2) List only the
+     354 directory roots and the 2 schemas in the manifest (each part stays reachable through its CountyTables root and
+     its CAR, with its size and CID inside that block): 356 rows per gateway, about 1 more hour at Pinata's pace; cheaper,
+     but it reads README.md:63's "query table" as the tables root rather than its parts, which a reviewer could contest.
