@@ -2279,10 +2279,17 @@
             "type": "integer"
           },
           "car_validation": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            }
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "path": {
             "type": "string"
@@ -2305,11 +2312,7 @@
           "group",
           "kind",
           "schema_cid",
-          "block_count",
-          "car_validation",
           "path",
-          "size",
-          "sha256",
           "readback_url"
         ]
       },
@@ -4038,7 +4041,14 @@
             ]
           },
           "contractor": {
-            "$ref": "#/components/schemas/PermitContractor"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitContractor"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bbb": {
             "$ref": "#/components/schemas/Bbb"
@@ -4337,7 +4347,14 @@
             ]
           },
           "contractor": {
-            "$ref": "#/components/schemas/PermitContractor"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitContractor"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bbb": {
             "$ref": "#/components/schemas/Bbb"
@@ -5377,7 +5394,10 @@
             "type": "string"
           },
           "url": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "watermark": {
             "type": [
@@ -5386,10 +5406,16 @@
             ]
           },
           "fetched_at": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "sha256": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "availability": {
             "type": "string"
