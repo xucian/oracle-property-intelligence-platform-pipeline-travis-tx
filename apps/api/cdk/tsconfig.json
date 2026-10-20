@@ -4,6 +4,6 @@
     "rootDir": ".",
     "outDir": "dist/types"
   },
-  "include": ["bin", "lib", "test", "*.ts"],
+  "include": ["bin", "lib", "test", "*.ts", "config.example.json"],
   "references": []
 }
