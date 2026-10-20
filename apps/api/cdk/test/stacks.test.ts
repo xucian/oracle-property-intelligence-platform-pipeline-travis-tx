@@ -253,6 +253,17 @@ describe('TravisApi stack', () => {
       });
     });
 
+    it('creates every throttled route before the stage that names it', () => {
+      const routes = api.findResources('AWS::ApiGatewayV2::Route') as Record<string, Json>;
+      const [stage] = Object.values(api.findResources('AWS::ApiGatewayV2::Stage')) as Json[];
+      const dependsOn = (stage!.DependsOn ?? []) as string[];
+      for (const key of Object.keys(stage!.Properties.RouteSettings)) {
+        const id = Object.keys(routes).find((k) => routes[k]!.Properties.RouteKey === key);
+        expect(id, key).toBeDefined();
+        expect(dependsOn, key).toContain(id);
+      }
+    });
+
     it('writes access logs with the required fields', () => {
       api.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
         AccessLogSettings: {

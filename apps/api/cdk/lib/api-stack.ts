@@ -19,6 +19,7 @@ import {
   CorsHttpMethod,
   HttpApi,
   HttpMethod,
+  type HttpRoute,
   HttpStage,
   LogGroupLogDestination,
 } from 'aws-cdk-lib/aws-apigatewayv2';
@@ -193,21 +194,28 @@ export class TravisApi extends Stack {
         maxAge: Duration.hours(1),
       },
     });
-    api.addRoutes({
-      path: '/v1/agent/chat',
-      methods: [HttpMethod.POST],
-      integration: new HttpLambdaIntegration('ChatIntegration', chatFn),
-    });
-    api.addRoutes({
-      path: '/v1/permits/text-search',
-      methods: [HttpMethod.GET],
-      integration: new HttpLambdaIntegration('TextSearchIntegration', apiFn),
-    });
-    api.addRoutes({
-      path: '/v1/mcp',
-      methods: [HttpMethod.POST],
-      integration: new HttpLambdaIntegration('McpIntegration', apiFn),
-    });
+    const routes: HttpRoute[] = [];
+    routes.push(
+      ...api.addRoutes({
+        path: '/v1/agent/chat',
+        methods: [HttpMethod.POST],
+        integration: new HttpLambdaIntegration('ChatIntegration', chatFn),
+      }),
+    );
+    routes.push(
+      ...api.addRoutes({
+        path: '/v1/permits/text-search',
+        methods: [HttpMethod.GET],
+        integration: new HttpLambdaIntegration('TextSearchIntegration', apiFn),
+      }),
+    );
+    routes.push(
+      ...api.addRoutes({
+        path: '/v1/mcp',
+        methods: [HttpMethod.POST],
+        integration: new HttpLambdaIntegration('McpIntegration', apiFn),
+      }),
+    );
 
     const accessLogs = new LogGroup(this, 'AccessLogs', {
       retention: LOG_RETENTION,
@@ -246,6 +254,8 @@ export class TravisApi extends Stack {
       };
     }
     (stage.node.defaultChild as CfnStage).routeSettings = routeSettings;
+    // RouteSettings name routes by key; CloudFormation rejects the stage if they do not exist yet.
+    for (const route of routes) stage.node.addDependency(route);
 
     // --- Alerting: one topic, email only ---
     const topic = new Topic(this, 'AlarmTopic', {
