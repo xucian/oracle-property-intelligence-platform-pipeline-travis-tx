@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bundle": "esbuild src/handlers/api.ts src/handlers/chat.ts --bundle --platform=node --target=node22 --format=esm --outdir=dist --out-extension:.js=.mjs --external:@duckdb/node-api --external:@duckdb/node-bindings --external:@aws-sdk/client-ssm --banner:js=\"import {createRequire} from 'module';const require=createRequire(import.meta.url);\"",
+    "bundle": "esbuild src/handlers/api.ts src/handlers/chat.ts --bundle --platform=node --target=node22 --format=esm --outdir=dist --out-extension:.js=.mjs --external:@duckdb/node-api --external:@duckdb/node-bindings --external:@aws-sdk/client-ssm --banner:js=\"import {createRequire as __bannerCreateRequire} from 'module';const require=__bannerCreateRequire(import.meta.url);\" && node --check dist/api.mjs && node --check dist/chat.mjs",
     "build": "tsc -b && npm run bundle",
     "typecheck": "tsc -b",
     "lint": "eslint .",
