@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!docker/fetch-extension.mjs
+!dist/api.mjs
+!dist/chat.mjs
+!build/db/travis.duckdb

@@ -1,0 +1,506 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { App } from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { TravisApi } from '../lib/api-stack.js';
+import { parseConfig } from '../lib/config.js';
+import { SPA_ROUTER_CODE, TravisWeb } from '../lib/web-stack.js';
+import example from '../config.example.json' with { type: 'json' };
+
+type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+const config = parseConfig({ ...example, chatReservedConcurrency: 3 });
+const env = { account: config.account, region: config.region };
+
+function fixtureDirs() {
+  const root = mkdtempSync(join(tmpdir(), 'travis-cdk-'));
+  const image = join(root, 'image');
+  const dist = join(root, 'dist');
+  mkdirSync(image);
+  mkdirSync(dist);
+  writeFileSync(join(image, 'Dockerfile'), 'FROM scratch\n');
+  writeFileSync(join(dist, 'index.html'), '<!doctype html>');
+  return { image, dist };
+}
+
+let api: Template;
+let web: Template;
+let unreserved: Template;
+
+beforeAll(() => {
+  const dirs = fixtureDirs();
+  api = Template.fromStack(
+    new TravisApi(new App(), 'TravisApi', { env, config, imageDirectory: dirs.image }),
+  );
+  web = Template.fromStack(
+    new TravisWeb(new App(), 'TravisWeb', { env, config, explorerDistDirectory: dirs.dist }),
+  );
+  const app2 = new App();
+  unreserved = Template.fromStack(
+    new TravisApi(app2, 'TravisApi', {
+      env,
+      config: parseConfig(example),
+      imageDirectory: dirs.image,
+    }),
+  );
+});
+
+/** All IAM statements attached to the role of the function whose logical id starts with `prefix`. */
+function statementsFor(t: Template, prefix: string): { actions: string[]; resources: unknown[] }[] {
+  const fns = t.findResources('AWS::Lambda::Function');
+  const id = Object.keys(fns).find((k) => k.startsWith(prefix));
+  if (!id) throw new Error(`function ${prefix} not found`);
+  const roleRef = (fns[id] as Json).Properties.Role['Fn::GetAtt'][0] as string;
+  const out: { actions: string[]; resources: unknown[] }[] = [];
+  for (const policy of Object.values(t.findResources('AWS::IAM::Policy')) as Json[]) {
+    if (!JSON.stringify(policy.Properties.Roles).includes(roleRef)) continue;
+    for (const s of policy.Properties.PolicyDocument.Statement as Json[]) {
+      out.push({
+        actions: ([] as string[]).concat(s.Action),
+        resources: ([] as unknown[]).concat(s.Resource),
+      });
+    }
+  }
+  return out;
+}
+
+const allActions = (s: { actions: string[] }[]) => s.flatMap((x) => x.actions);
+
+describe('TravisApi stack', () => {
+  it('has fixed name, termination protection and the project_name tag', () => {
+    const app = new App();
+    const d = fixtureDirs();
+    const stack = new TravisApi(app, 'TravisApi', { env, config, imageDirectory: d.image });
+    expect(stack.terminationProtection).toBe(true);
+    expect(stack.region).toBe('us-east-2');
+  });
+
+  it('runs both functions on arm64 from the same image with distinct CMDs', () => {
+    const fns = Object.values(api.findResources('AWS::Lambda::Function')) as Json[];
+    const images = fns.filter((f) => f.Properties.PackageType === 'Image');
+    expect(images).toHaveLength(2);
+    for (const f of images) expect(f.Properties.Architectures).toEqual(['arm64']);
+    expect(images.map((f) => f.Properties.ImageConfig.Command[0]).sort()).toEqual([
+      'api.handler',
+      'chat.handler',
+    ]);
+    expect(new Set(images.map((f) => JSON.stringify(f.Properties.Code.ImageUri))).size).toBe(1);
+    expect(
+      Object.keys(api.toJSON().Resources).filter(
+        (k) => k.includes('Image') && !k.includes('Function'),
+      ),
+    ).toBeDefined();
+  });
+
+  it('gives chat a 28 s timeout, the reservation when R > 0, and none when 0', () => {
+    api.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.objectLike({ POWERTOOLS_SERVICE_NAME: 'travis-chat' }) },
+      Timeout: 28,
+      ReservedConcurrentExecutions: 3,
+    });
+    const chat = Object.values(unreserved.findResources('AWS::Lambda::Function')).find(
+      (f) =>
+        (f as Json).Properties.Environment?.Variables?.POWERTOOLS_SERVICE_NAME === 'travis-chat',
+    ) as Json;
+    expect(chat.Properties).not.toHaveProperty('ReservedConcurrentExecutions');
+  });
+
+  it('sets the interface environment variables', () => {
+    api.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          DUCKDB_PATH: '/opt/db/travis.duckdb',
+          DUCKDB_EXTENSION_DIR: '/opt/duckdb_extensions',
+          DUCKDB_MEMORY_LIMIT: '1GB',
+          DUCKDB_THREADS: '2',
+          POWERTOOLS_SERVICE_NAME: 'travis-api',
+          POWERTOOLS_METRICS_NAMESPACE: 'TravisPropertyIntelligence',
+          LIMITS_JSON: Match.stringLikeRegexp('agent/chat'),
+        }),
+      },
+    });
+    api.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          CHAT_FLAG_PARAM: '/travis/chat/budget-exhausted',
+          BEDROCK_MODEL_ID: 'us.anthropic.claude-opus-5-5',
+        }),
+      },
+    });
+  });
+
+  describe('IAM', () => {
+    it('api function: logs and X-Ray only', () => {
+      const s = statementsFor(api, 'ApiFunction');
+      const actions = allActions(s);
+      expect(actions.sort()).toEqual(
+        expect.arrayContaining(['xray:PutTraceSegments', 'xray:PutTelemetryRecords']),
+      );
+      for (const a of actions) expect(a).toMatch(/^(xray|ecr|logs):/);
+      const role = Object.values(api.findResources('AWS::IAM::Role')).find((r) =>
+        JSON.stringify((r as Json).Properties.ManagedPolicyArns ?? '').includes(
+          'AWSLambdaBasicExecutionRole',
+        ),
+      );
+      expect(role).toBeDefined();
+      const flat = JSON.stringify(s);
+      for (const denied of ['bedrock', 's3:', 'ssm:', 'aws-marketplace', 'secretsmanager']) {
+        expect(flat).not.toContain(denied);
+      }
+    });
+
+    it('chat function: Bedrock invoke on the profile and foundation-model ARNs, ssm:GetParameter on the flag', () => {
+      const s = statementsFor(api, 'ChatFunction');
+      const bedrock = s.find((x) => x.actions.some((a) => a.startsWith('bedrock:')))!;
+      expect(bedrock.actions.sort()).toEqual([
+        'bedrock:InvokeModel',
+        'bedrock:InvokeModelWithResponseStream',
+      ]);
+      expect(bedrock.resources).toEqual([
+        `arn:aws:bedrock:us-east-2:${config.account}:inference-profile/us.anthropic.claude-opus-5-5`,
+        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5',
+        'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5',
+        'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5',
+      ]);
+      const ssm = s.find((x) => x.actions.includes('ssm:GetParameter'))!;
+      expect(ssm.actions).toEqual(['ssm:GetParameter']);
+      expect(JSON.stringify(ssm.resources)).toContain('ChatBudgetFlag');
+      const flat = JSON.stringify(s);
+      for (const denied of ['s3:', 'aws-marketplace', 'ssm:PutParameter', 'secretsmanager']) {
+        expect(flat).not.toContain(denied);
+      }
+    });
+
+    it('flag writer: ssm:PutParameter on the flag only', () => {
+      const s = statementsFor(api, 'BudgetFlagSetter');
+      const put = s.find((x) => x.actions.includes('ssm:PutParameter'))!;
+      expect(put.actions).toEqual(['ssm:PutParameter']);
+      expect(JSON.stringify(put.resources)).toContain('ChatBudgetFlag');
+      expect(JSON.stringify(s)).not.toContain('bedrock');
+    });
+
+    it('no policy in either stack mentions aws-marketplace', () => {
+      expect(JSON.stringify(api.toJSON())).not.toContain('aws-marketplace');
+      expect(JSON.stringify(web.toJSON())).not.toContain('aws-marketplace');
+    });
+
+    it('stores the flag as a standard SSM parameter', () => {
+      api.hasResourceProperties('AWS::SSM::Parameter', {
+        Name: '/travis/chat/budget-exhausted',
+        Type: 'String',
+        Tier: 'Standard',
+        Value: 'false',
+      });
+    });
+  });
+
+  describe('HTTP API', () => {
+    it('has the four routes with the right integrations', () => {
+      const routes = Object.values(api.findResources('AWS::ApiGatewayV2::Route')) as Json[];
+      expect(routes.map((r) => r.Properties.RouteKey).sort()).toEqual([
+        '$default',
+        'GET /v1/permits/text-search',
+        'POST /v1/agent/chat',
+        'POST /v1/mcp',
+      ]);
+      const integrations = api.findResources('AWS::ApiGatewayV2::Integration');
+      const target = (key: string) => {
+        const route = routes.find((r) => r.Properties.RouteKey === key)!;
+        const ref = (route.Properties.Target['Fn::Join'][1] as unknown[]).find(
+          (p) => typeof p === 'object' && p !== null && 'Ref' in p,
+        ) as { Ref: string };
+        const integ = integrations[ref.Ref] as Json;
+        return JSON.stringify(integ.Properties.IntegrationUri);
+      };
+      expect(target('POST /v1/agent/chat')).toContain('ChatFunction');
+      expect(target('$default')).toContain('ApiFunction');
+      expect(target('GET /v1/permits/text-search')).toContain('ApiFunction');
+      expect(target('POST /v1/mcp')).toContain('ApiFunction');
+    });
+
+    it('sets CORS on the API per the contract', () => {
+      api.hasResourceProperties('AWS::ApiGatewayV2::Api', {
+        CorsConfiguration: {
+          AllowOrigins: ['*'],
+          AllowHeaders: ['content-type', 'mcp-protocol-version'],
+          AllowMethods: ['GET', 'POST', 'OPTIONS'],
+          ExposeHeaders: ['x-request-id', 'apigw-requestid'],
+          AllowCredentials: false,
+        },
+      });
+    });
+
+    it('applies stage and per-route throttles from the config', () => {
+      api.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
+        StageName: '$default',
+        AutoDeploy: true,
+        DefaultRouteSettings: Match.objectLike({
+          ThrottlingRateLimit: 20,
+          ThrottlingBurstLimit: 40,
+        }),
+        RouteSettings: {
+          'POST /v1/agent/chat': Match.objectLike({
+            ThrottlingRateLimit: 1,
+            ThrottlingBurstLimit: 3,
+          }),
+          'GET /v1/permits/text-search': Match.objectLike({
+            ThrottlingRateLimit: 5,
+            ThrottlingBurstLimit: 10,
+          }),
+        },
+      });
+    });
+
+    it('writes access logs with the required fields', () => {
+      api.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
+        AccessLogSettings: {
+          Format: Match.stringLikeRegexp('requestId.*routeKey.*status.*integrationErrorMessage'),
+        },
+      });
+    });
+  });
+
+  it('keeps 90 days on every log group and points every function at one', () => {
+    const groups = Object.values(api.findResources('AWS::Logs::LogGroup')) as Json[];
+    expect(groups.length).toBeGreaterThanOrEqual(5);
+    for (const g of groups) {
+      expect(g.Properties.RetentionInDays).toBe(90);
+      expect(g.DeletionPolicy).toBe('Delete');
+    }
+    for (const f of Object.values(api.findResources('AWS::Lambda::Function')) as Json[]) {
+      expect(f.Properties.LoggingConfig?.LogGroup).toBeDefined();
+    }
+  });
+
+  describe('alarms and kill switch', () => {
+    it('has at most ten alarms, all notifying the one email-only topic and self-resolving', () => {
+      const alarms = Object.values(api.findResources('AWS::CloudWatch::Alarm')) as Json[];
+      expect(alarms.length).toBeLessThanOrEqual(10);
+      expect(alarms.length).toBe(8);
+      for (const a of alarms) {
+        expect(a.Properties.AlarmActions).toHaveLength(1);
+        expect(a.Properties.OKActions).toHaveLength(1);
+        expect(a.Properties.TreatMissingData).toBe('notBreaching');
+      }
+      const topics = api.findResources('AWS::SNS::Topic');
+      expect(Object.keys(topics)).toHaveLength(1);
+      const subs = Object.values(api.findResources('AWS::SNS::Subscription')) as Json[];
+      expect(subs.filter((s) => s.Properties.Protocol === 'email')).toHaveLength(
+        config.alarmEmails.length,
+      );
+      expect(subs.filter((s) => s.Properties.Protocol === 'https')).toHaveLength(0);
+    });
+
+    it('daily usage alarm uses a one-day sum of chat invocations at the configured limit', () => {
+      api.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'travis-chat-daily-usage',
+        MetricName: 'Invocations',
+        Period: 86400,
+        Statistic: 'Sum',
+        Threshold: config.dailyChatRequestLimit,
+      });
+    });
+
+    it('sets the flag through SNS and clears it daily through EventBridge Scheduler', () => {
+      api.hasResourceProperties('AWS::Lambda::Permission', { Principal: 'sns.amazonaws.com' });
+      api.hasResourceProperties('AWS::Scheduler::Schedule', {
+        ScheduleExpression: 'cron(0 0 * * ? *)',
+        ScheduleExpressionTimezone: 'UTC',
+        Target: Match.objectLike({
+          Arn: 'arn:aws:scheduler:::aws-sdk:ssm:putParameter',
+          Input: Match.stringLikeRegexp('budget-exhausted'),
+        }),
+      });
+    });
+
+    it('does not use reserved concurrency zero as the kill switch', () => {
+      for (const f of Object.values(unreserved.findResources('AWS::Lambda::Function')) as Json[]) {
+        expect(f.Properties.ReservedConcurrentExecutions).not.toBe(0);
+      }
+    });
+  });
+
+  it('has a private deploy bucket', () => {
+    expectPrivateBuckets(api, 1);
+  });
+
+  it('has one dashboard and the required outputs', () => {
+    api.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
+    const outputs = Object.keys(api.toJSON().Outputs);
+    expect(outputs).toEqual(
+      expect.arrayContaining([
+        'ApiBase',
+        'ApiFunctionName',
+        'ChatFunctionName',
+        'DeployBucketName',
+      ]),
+    );
+  });
+});
+
+function expectPrivateBuckets(t: Template, count: number) {
+  const buckets = Object.entries(t.findResources('AWS::S3::Bucket')).filter(
+    ([k]) => !k.includes('Custom'),
+  );
+  expect(buckets).toHaveLength(count);
+  for (const [, b] of buckets as [string, Json][]) {
+    expect(b.Properties.PublicAccessBlockConfiguration).toEqual({
+      BlockPublicAcls: true,
+      BlockPublicPolicy: true,
+      IgnorePublicAcls: true,
+      RestrictPublicBuckets: true,
+    });
+    expect(
+      b.Properties.BucketEncryption.ServerSideEncryptionConfiguration[0]
+        .ServerSideEncryptionByDefault,
+    ).toEqual({
+      SSEAlgorithm: 'AES256',
+    });
+    expect(b.DeletionPolicy).toBe('Delete');
+  }
+  const policies = Object.values(t.findResources('AWS::S3::BucketPolicy')) as Json[];
+  expect(policies).toHaveLength(count);
+  for (const p of policies) {
+    const denyTls = (p.Properties.PolicyDocument.Statement as Json[]).find(
+      (s) => s.Effect === 'Deny' && s.Condition?.Bool?.['aws:SecureTransport'] === 'false',
+    );
+    expect(denyTls).toBeDefined();
+  }
+}
+
+describe('TravisWeb stack', () => {
+  it('has fixed name, termination protection and the project_name tag', () => {
+    const app = new App();
+    const d = fixtureDirs();
+    const stack = new TravisWeb(app, 'TravisWeb', { env, config, explorerDistDirectory: d.dist });
+    expect(stack.terminationProtection).toBe(true);
+  });
+
+  it('has an explorer bucket and a mirror bucket, both private', () => {
+    expectPrivateBuckets(web, 2);
+    web.resourceCountIs('AWS::CloudFront::OriginAccessControl', 2);
+  });
+
+  it('serves /tables/* from the mirror with GET/HEAD/OPTIONS, no compression and immutable caching', () => {
+    const dist = Object.values(web.findResources('AWS::CloudFront::Distribution'))[0] as Json;
+    const cfg = dist.Properties.DistributionConfig;
+    const behavior = (cfg.CacheBehaviors as Json[]).find((b) => b.PathPattern === '/tables/*')!;
+    expect(behavior.AllowedMethods).toEqual(['GET', 'HEAD', 'OPTIONS']);
+    expect(behavior.Compress).toBe(false);
+    expect(behavior.TargetOriginId).not.toBe(cfg.DefaultCacheBehavior.TargetOriginId);
+    expect(behavior.FunctionAssociations).toBeUndefined();
+    expect(cfg.CustomErrorResponses).toBeUndefined();
+    expect(cfg.DefaultCacheBehavior.FunctionAssociations).toHaveLength(1);
+    expect(cfg.DefaultCacheBehavior.FunctionAssociations[0].EventType).toBe('viewer-request');
+    web.hasResourceProperties('AWS::CloudFront::CachePolicy', {
+      CachePolicyConfig: Match.objectLike({
+        MinTTL: 31536000,
+        DefaultTTL: 31536000,
+        MaxTTL: 31536000,
+        ParametersInCacheKeyAndForwardedToOrigin: Match.objectLike({
+          EnableAcceptEncodingGzip: false,
+          EnableAcceptEncodingBrotli: false,
+        }),
+      }),
+    });
+  });
+
+  it('allows Range from any origin and exposes the range headers on /tables/*', () => {
+    web.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+      ResponseHeadersPolicyConfig: Match.objectLike({
+        CorsConfig: {
+          AccessControlAllowOrigins: { Items: ['*'] },
+          AccessControlAllowHeaders: { Items: Match.arrayWith(['Range']) },
+          AccessControlAllowMethods: { Items: ['GET', 'HEAD', 'OPTIONS'] },
+          AccessControlExposeHeaders: {
+            Items: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'ETag'],
+          },
+          AccessControlAllowCredentials: false,
+          OriginOverride: true,
+          AccessControlMaxAgeSec: 86400,
+        },
+        CustomHeadersConfig: {
+          Items: [
+            Match.objectLike({
+              Header: 'Cache-Control',
+              Value: Match.stringLikeRegexp('immutable'),
+            }),
+          ],
+        },
+      }),
+    });
+  });
+
+  it('routes the single-page app with a viewer-request function that leaves /tables/* alone', () => {
+    web.hasResourceProperties('AWS::CloudFront::Function', {
+      FunctionConfig: Match.objectLike({ Runtime: 'cloudfront-js-2.0' }),
+    });
+    const run = new Function(`${SPA_ROUTER_CODE}; return handler;`)() as (e: unknown) => {
+      uri: string;
+    };
+    expect(run({ request: { uri: '/search/roofs' } }).uri).toBe('/index.html');
+    expect(run({ request: { uri: '/' } }).uri).toBe('/index.html');
+    expect(run({ request: { uri: '/assets/app-1a2b.js' } }).uri).toBe('/assets/app-1a2b.js');
+    expect(run({ request: { uri: '/tables/bafy/address/part-00000.parquet' } }).uri).toBe(
+      '/tables/bafy/address/part-00000.parquet',
+    );
+    expect(run({ request: { uri: '/tables/bafy/missing' } }).uri).toBe('/tables/bafy/missing');
+  });
+
+  it('deploys the explorer invalidating only /index.html and serves .wasm as application/wasm', () => {
+    const deployments = Object.values(web.findResources('Custom::CDKBucketDeployment')) as Json[];
+    expect(deployments).toHaveLength(2);
+    const main = deployments.find((d) => d.Properties.DistributionId)!;
+    expect(main.Properties.DistributionPaths).toEqual(['/index.html']);
+    const wasm = deployments.find((d) => !d.Properties.DistributionId)!;
+    expect(wasm.Properties.SystemMetadata['content-type']).toBe('application/wasm');
+    expect(wasm.Properties.Exclude).toEqual(['*']);
+    expect(wasm.Properties.Include).toEqual(['*.wasm']);
+    expect(wasm.Properties.Prune).toBe(false);
+  });
+
+  it('does not fill the mirror by deployment and exposes the outputs', () => {
+    const deployments = Object.values(web.findResources('Custom::CDKBucketDeployment')) as Json[];
+    for (const d of deployments) {
+      expect(JSON.stringify(d.Properties.DestinationBucketName)).toContain('ExplorerStore');
+    }
+    expect(Object.keys(web.toJSON().Outputs)).toEqual(
+      expect.arrayContaining(['ExplorerUrl', 'MirrorBucket', 'DistributionId']),
+    );
+  });
+
+  it('keeps 90 days on every log group, including custom-resource functions', () => {
+    for (const g of Object.values(web.findResources('AWS::Logs::LogGroup')) as Json[]) {
+      expect(g.Properties.RetentionInDays).toBe(90);
+      expect(g.DeletionPolicy).toBe('Delete');
+    }
+    const fns = Object.values(web.findResources('AWS::Lambda::Function')) as Json[];
+    expect(fns.length).toBeGreaterThan(0);
+    for (const f of fns) expect(f.Properties.LoggingConfig?.LogGroup).toBeDefined();
+  });
+});
+
+describe('tags', () => {
+  it('tags taggable resources in both stacks with project_name', () => {
+    const tag = { Key: 'project_name', Value: config.projectName };
+    api.hasResourceProperties('AWS::S3::Bucket', { Tags: Match.arrayWith([tag]) });
+    web.hasResourceProperties('AWS::S3::Bucket', { Tags: Match.arrayWith([tag]) });
+  });
+});
+
+describe('config', () => {
+  it('rejects a non-us-east-2 region and a missing email', () => {
+    expect(() => parseConfig({ ...example, region: 'us-west-2' })).toThrow();
+    expect(() => parseConfig({ ...example, alarmEmails: [] })).toThrow();
+  });
+  it('defaults the model to the Opus 5.5 profile and chat reservation to unreserved', () => {
+    const rest: Json = { ...example };
+    delete rest.bedrockModelId;
+    delete rest.chatReservedConcurrency;
+    const parsed = parseConfig(rest);
+    expect(parsed.bedrockModelId).toBe('us.anthropic.claude-opus-5-5');
+    expect(parsed.chatReservedConcurrency).toBe(0);
+  });
+});

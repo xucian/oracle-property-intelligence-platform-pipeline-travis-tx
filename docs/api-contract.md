@@ -624,5 +624,12 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
 - 2026-10-18, T5 preparation (a defect correction allowed until T7's first deploy): `evidence_states.tcad_id` in `/v1/meta`
   and Run gains `unknown`, the permits that print a blank `tcad_id` (63,019 in the T4 capture), so the field's three states
   sum to the permit rows as the other two fields' states do; the link pass has counted them since T4. No other field changes.
+- 2026-10-20, T7 build (a defect correction allowed until T7's first deploy; decisions.md section 29): the real run records
+  (`runs/20261017T072132Z-pilot.json`, `runs/20261018T143520Z-t5-full.json`) did not validate against Run. `sources[].url`,
+  `sources[].fetched_at` and `sources[].sha256` become nullable (a T3 snapshot or the TNR page capture has no single URL,
+  fetch time or file hash); a Run `cars[]` entry's `block_count`, `size`, `sha256` and `car_validation` become optional (a
+  tables CAR's are not in the run record; the manifest carries every CAR's size and SHA-256). The server maps a `window`
+  entry without bounds to `from`/`to` null, and a free-text `limitations[].records_request` to null with its text in
+  `detail`. No other field changes.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.
