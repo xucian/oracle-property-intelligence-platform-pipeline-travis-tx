@@ -1,4 +1,4 @@
-# Hosted layer: fixed interface points (T7 + T8)
+# Hosted layer: fixed interface points (T7 + T8, T9)
 
 Written by the foundation step so the data/API, CDK and explorer work can proceed in parallel. Changing any item here
 is a coordinated change. Contract: `docs/api-contract.md` v1 and `packages/contract/openapi.json`. Layout rationale:
@@ -26,8 +26,8 @@ Versions: DuckDB 1.5.6, `@duckdb/node-api` 1.5.6-r.1, `@duckdb/duckdb-wasm` 1.33
 ## Handlers
 
 - `apps/api/src/handlers/api.ts`: `export const handler` for the REST `$default` route, `GET /v1/permits/text-search` and `POST /v1/mcp`. Route table: `ENDPOINTS` from `@travis/contract`; parameters: `coerceQuery` then the endpoint's schema; MCP: `TOOLS` / `mcpToolListing()`.
-- `apps/api/src/handlers/chat.ts`: `export const handler` for `POST /v1/agent/chat` (the only function with Bedrock).
-- Bundled by `npm run build -w @travis/api` (esbuild) to `apps/api/dist/api.mjs` and `apps/api/dist/chat.mjs`. `@duckdb/node-api` and `@duckdb/node-bindings` stay external (installed in the image).
+- `apps/api/src/handlers/chat.ts`: `export const handler` for `POST /v1/agent/chat` (the only function with Bedrock); the agent itself is `apps/api/src/chat/` (see "T9 chat route"). Both handlers open the query layer through `apps/api/src/db.ts`.
+- Bundled by `npm run build -w @travis/api` (esbuild) to `apps/api/dist/api.mjs` and `apps/api/dist/chat.mjs` (3.7 MB: the AI SDK, its Bedrock provider and `langsmith` are bundled). `@duckdb/node-api` and `@duckdb/node-bindings` stay external (installed in the image); `@aws-sdk/client-ssm` and `@aws-sdk/client-secrets-manager` too (the Lambda base image ships them; loaded with `createRequire`).
 - `GET /v1/openapi.json` returns `OPENAPI_JSON` unchanged. Responses carry `x-request-id` = `requestContext.requestId`; CORS is API Gateway's, never the handler's.
 - Throttle numbers for `/v1/meta.limits` come from the CDK config via env `LIMITS_JSON` (`{stage, routes, mcp, chat}`).
 
@@ -63,15 +63,40 @@ Order: deploy-build, `just deploy-api` (serving export and upload, then `cdk dep
 | `DUCKDB_EXTENSION_DIR` | both | `/opt/duckdb_extensions` (bundled `fts` and `httpfs`, autoinstall and autoload off) |
 | `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS` | both | from the CDK config, sized from the T7 measurements |
 | `LIMITS_JSON` | both | `{stage, routes, mcp, chat}` from the CDK config, served in `/v1/meta.limits` |
-| `POWERTOOLS_SERVICE_NAME` | both | `travis-api` / `travis-chat` |
-| `POWERTOOLS_METRICS_NAMESPACE` | both | `TravisPropertyIntelligence` |
+| `POWERTOOLS_SERVICE_NAME` | both | `travis-api` / `staraptor-agent` (decisions.md section 32) |
+| `POWERTOOLS_METRICS_NAMESPACE` | both | `TravisPropertyIntelligence` / `staraptor-agent` |
 | `CHAT_FLAG_PARAM` | chat | SSM parameter name of the budget kill switch (`/travis/chat/budget-exhausted`, value `true`/`false`) |
-| `BEDROCK_MODEL_ID` | chat | stack parameter; unused until T9 |
+| `BEDROCK_MODEL_ID` | chat | the inference profile, `bedrockModelId` in the CDK config (default `us.anthropic.claude-sonnet-4-6`) |
+| `LANGSMITH_API_KEY_SECRET_ID` | chat | `staraptor-agent/langsmith-api-key`: the Secrets Manager secret read at init (the key is never in the environment) |
+| `LANGSMITH_PROJECT`, `LANGSMITH_TRACING` | chat | `staraptor-agent`, `true` |
 
-The image's `CMD` selects the handler: `api.handler` or `chat.handler`. `api.handler` also accepts `{"warm": {"hold_ms": 1500}}` from `just warm` (decisions.md section 31): it opens and, once per instance, primes the instance, and answers `{warmed, primed_now}`.
+The image's `CMD` selects the handler: `api.handler` or `chat.handler`. Both accept `{"warm": {"hold_ms": 1500}}` from `just warm` (decisions.md sections 31 and 32): it opens and, once per instance, primes the instance, and answers `{warmed, primed_now}`. The chat warm-up runs the README turns' tool calls (`AGENT_PRIME` in `apps/api/src/warm.ts`) and never calls the model; a chat request the contract rejects (`400`/`413`) primes the instance the same way before it answers, which is how the explorer prewarms.
 
-## T7 chat route
+## T9 chat route
 
-Until T9 the chat handler answers `503 {error: "agent_unavailable", reason: "model_unavailable", request_id}` without
-calling Bedrock (`reason: "budget_exhausted"` when the SSM flag is `true`), so the route, its throttle, the kill switch
-and the alarms are deployed and checked at T7 at no model cost.
+`POST /v1/agent/chat` (api-contract.md; decisions.md sections 20, 21 and 32):
+
+| Module (`apps/api/src/chat/`) | Role |
+| --- | --- |
+| `request.ts` | 20 messages, 4,000 characters each, 16,000 in total (`413 request_too_large`), roles, last message `user`, `session_id` (`400 invalid_params`) |
+| `tools.ts` | the registry's agent tools (`TOOLS` with `agent: true`), the query layer in-process, `limit` 20 (max 50), one log line per call |
+| `guard.ts` | the search-center rule: `lat`/`lon` only from this turn's `resolve_search_center` (exact matches) or numbers the user typed |
+| `projection.ts`, `sanitize.ts` | what the model sees: ids, CIDs, signals, `source.url`; free text sanitized and capped at 1,000 characters; personal fields only for ownership or contact questions |
+| `prompt.ts` | the system prompt with the per-deploy run summary, `PROMPT_VERSION`, the `OUTCOME:`/`ASSUMPTION:` header parser |
+| `bedrock-prompt-cache.ts`, `model.ts` | the kit's prompt-caching middleware around the Bedrock (Converse) model |
+| `governor.ts` | the 25 s deadline from `requestContext.timeEpoch`, step timeouts from what remains, one retry, the output budget across steps, the circuit breaker |
+| `evidence.ts`, `citations.ts` | `evidence[]` from tool results, the fail-closed citation check, the typed limitations and server assumptions |
+| `langsmith.ts` | the kit's tracing facade (secret read at run time, `flush()`, person fields hidden) |
+| `turn.ts` | one turn: the AI SDK `ToolLoopAgent` (`stopWhen` 6 steps) and the response |
+
+Answers: `200` with the contract's response (outcomes `answered`, `no_matches`, `needs_clarification`, `out_of_scope`,
+`out_of_county`, `limit_reached` at the deadline, `tool_error` when the citation check fails or `answered` lacks a successful
+tool call); `503 agent_unavailable` with `budget_exhausted` (the SSM flag), `circuit_open` or `model_unavailable` (Bedrock
+access denied). Per turn one EMF document in the `staraptor-agent` namespace (`ChatTurns`, `ChatSteps`, `ChatToolCalls`,
+token counts, `ChatTurnLatency`, `ChatDeadlineHits`, `ChatCitationFailures`, `BedrockThrottles`, `BedrockDenials`,
+`ChatOutcome` by outcome) and one `chat turn` log line (ids, counts, hashes and timings).
+
+Local and SAM: `apps/api/scripts/chat-local.ts` runs the exported handler in Node with API Gateway v2 events against
+`data/deploy/current/serving/serving.duckdb` and the deploy bucket's Parquet tables (the shell's AWS session);
+`apps/api/scripts/golden.ts` replays the golden set locally or against a base URL; `just sam-local` builds the image from
+`cdk.out` (`cdk synth -c sam-local=1`, `sam build --use-buildkit`) and runs the events in `apps/api/sam/events/`.

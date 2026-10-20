@@ -2050,3 +2050,101 @@ adjacent paths too; prefer an honest loading state and a prewarm triggered by re
 - **What a reviewer can still meet.** On an idle API, the first call after a quiet period takes about 5 s (8-9 s if
   Lambda has dropped the image's cached blocks), behind a loading message that says why. On an instance a warm-up primed,
   the CRM call's handler takes 0.3 s (1.6 s end to end, mostly its 500 items travelling); other calls take 0.6-3 s.
+
+## 32. 2026-10-20: T9 built — the agent on Bedrock Sonnet 4.6, its tracing, name and limits, SAM local and the golden set
+
+The operator's rulings of 2026-10-20 on the T9 brief, and what the build measured. Contract v1 is unchanged: the generated
+`openapi.json` is byte-identical (SHA-256 `7d8ece68…`, the CRM's pin).
+
+- **Model (ruling 1; replaces section 8's model bullet).** On account 561303652468 Bedrock answers AccessDenied ("not
+  available for this account", `agreementAvailability` `NOT_AVAILABLE`) for every Claude model from Opus 4.7 and Sonnet 5
+  on, including `us.anthropic.claude-opus-5-5`, `-sonnet-5-5` and `-haiku-5-5`. Converse works for
+  `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-haiku-4-5-20251001-v1:0` and
+  `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. The operator's ruling: stay on Bedrock, use the 4.6 models, compare
+  Sonnet 4.6 and Opus 4.6 on the golden set (section 20, "Model"). **Sonnet 4.6 won** (table below) and is the
+  `bedrockModelId` default in `config.ts`, `config.json` and `config.example.json`. Both profiles route to us-east-1,
+  us-east-2 and us-west-2; the foundation-model id is the profile id without `us.` (`anthropic.claude-opus-4-6-v1` for Opus
+  4.6), and a CDK test pins the ARNs for both. Quotas: 10,000 requests a minute; 6M tokens a minute for Sonnet 4.6, 3M for
+  Opus 4.6. Moving to 5.5 later is a config change plus a golden-set rerun.
+- **Timing spike first** (`apps/api/scripts/chat-spike.ts`, real tool payloads of the README turns, streamed, from the
+  operator's machine). Tool-choice steps: Sonnet 4.6 1.3-1.6 s, Opus 4.6 1.7-2.5 s, Haiku 4.5 1.2-1.5 s. The answer step
+  with 20 records in context and a 450-600-token answer: Sonnet 7.0-8.5 s, Opus 6.6-10.5 s, Haiku 4.0-5.2 s (Haiku also
+  cited an address as a property id). A README turn is three model steps (resolve the place, search, answer; turn 2
+  fetches again, since earlier turns are never evidence), so the answer's length decided the turn: it was cut to at most
+  three sentences and three records, one line each, no commentary before tool calls, 600 output tokens per step and 1,500
+  per turn (`LIMITS_JSON`). Long lists reach the user as `evidence[]`, which the explorer renders, not as model tokens.
+- **Golden set** (`fixtures/rag/queries/*.json`, 22 cases, 24 turns, built by `apps/api/scripts/golden-build.ts`: expected
+  tool sequences and parameters, expected ids from the query layer's SQL on deploy `e17c90aa0b91ccae`, expected outcomes,
+  12 hand-labelled hail re-roof permits for text search). Run once per model, fixed (non-exact search centers rejected by
+  the harness, server guidance in `resolve_search_center` results, outcome inference for a reply that only asks, the
+  runner's id recall), run once more; one result file per run in `fixtures/rag/results/`. Run 2, local replay:
+
+  | Model | Hard gates | Outcome accuracy | Parameter accuracy | Id recall | Text P@k / R@k | p50 / p95 / max turn | README turns | Tokens per turn (in / out / cache read) | Cost per turn |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Sonnet 4.6 | 24/24, 24/24 | 1.000 | 1.000 | 1.000 | 0.66 / 0.64 | 8.0 / 12.6 / 15.1 s | 7.3 s, 10.0 s | 12,810 / 355 / 8,945 | $0.022 |
+  | Opus 4.6 | 24/24, 24/24 | 0.958 | 1.000 | 1.000 | 0.49 / 0.75 | 8.8 / 14.4 / 23.9 s (one deadline hit) | 8.7 s, 12.1 s | 12,557 / 347 / 716 | $0.076 |
+
+  Run 1 (before the fixes): Sonnet 0.917 outcome accuracy, p95 13.1 s; Opus 0.917, p95 14.9 s, one deadline hit. Costs are
+  list prices per million tokens (Sonnet $3 in, $15 out, $0.30 cache read, $3.75 cache write; Opus $5, $25, $0.50, $6.25);
+  Bedrock's on-demand Claude prices follow them, and a US geo profile may carry a premium, so the cost table quotes them as
+  an estimate. Opus reads almost nothing from the cache: its minimum cacheable prefix is 4,096 tokens and the system prompt
+  plus tools are about 3,400. The local replay reads the S3 tables from the operator's machine, so its tool times are a
+  distant client's; the README turns were primed and are model time (6.7 s and 9.4 s of model steps). The live replay
+  after deploy is the real check.
+- **LangSmith (ruling 2).** The key is the Secrets Manager secret `staraptor-agent/langsmith-api-key` (a plain string,
+  created 2026-10-20 and verified against the LangSmith API), imported by name; the chat role alone gets
+  `secretsmanager:GetSecretValue` on `…:secret:staraptor-agent/langsmith-api-key-??????`; the function reads it at init and
+  caches it (`LANGSMITH_API_KEY_SECRET_ID`, never the key in the environment). `LANGSMITH_PROJECT=staraptor-agent`. The
+  kit's facade on `langsmith` 0.11 (`wrapAISDK` wraps AI SDK 7's `ToolLoopAgent`): session and thread = `session_id`, else
+  the request id; `flush()` within the deadline (at most 2 s); a failed secret read or wrapper gives the plain SDK and is
+  retried after 5 minutes. Person fields are hidden by key in every traced input and output, and the person values a
+  personal view returned in a turn are hidden in any traced text, the model's answer included (checked in LangSmith:
+  `owner_name` and `mailing_address` read `[hidden]`). Traces from the local replay and from SAM local arrived with model
+  and tool child runs. LangSmith's trace retention is the plan's; the operator records it.
+- **Name (ruling 3).** `staraptor-agent` names `LANGSMITH_PROJECT`, the chat function's Powertools service and its metrics
+  namespace (was `travis-chat` in `TravisPropertyIntelligence`). The alarms are unaffected: the chat error-rate, daily-usage
+  and throttle alarms read `AWS/Lambda` metrics and the flag alarm reads `ChatBudgetFlagSet`, which the flag setter writes
+  to `TravisPropertyIntelligence`; the CDK assertions cover all of them. Section 20 asked for a daily request **and token**
+  budget; T7 had requests only, so a ninth alarm, `travis-chat-daily-tokens` (input plus output tokens a UTC day over
+  `dailyChatTokenLimit`, default 5,000,000, about $9 on Sonnet at the measured mix of cache reads and writes), also sets
+  the kill switch.
+- **Concurrency (ruling 4).** `aws lambda get-account-settings` shows 1,000 concurrent executions (10 at T7, section 29).
+  Section 21's formula with the measured p95 of 12.6 s: R ≤ min(5, 10,000 × 12.6 ÷ 360 = 350) = **5**; route rate ≈ R ÷ p95
+  = 5 ÷ 12.6 = **0.4 requests a second, burst 5** (was 1 and 3). Both in the config, published in `/v1/meta.limits`.
+- **SAM local (ruling 5, final; replaces section 20's "replayed under SAM local" and section 21's "local is SAM local").**
+  T9 runs three cases with `sam local invoke` of the chat function from `cdk.out` (the README two-turn conversation, one
+  out-of-scope, one prompt injection) to prove the image, packaging and event handling. The full golden set runs through a
+  tsx script calling the same exported handler with the same events, against the built-in serving DB, the S3 Parquet
+  tables and real Bedrock. It then runs against the live `POST /v1/agent/chat`, which is the real check. SAM proves nothing
+  about IAM, quotas or Bedrock access. If SAM can't load the CDK image, the same image runs under the Lambda Runtime
+  Interface Emulator via `docker run`, recorded as a deviation. As built (`just sam-local`): SAM loads the CDK image once
+  `cdk synth -c sam-local=1` adds the asset metadata SAM's CDK support reads (both functions take the shared asset through
+  `fromEcr`, so CDK writes none; the deployed template stays without it) and `sam build --use-buildkit` builds it (the
+  Dockerfile's `COPY --chmod` needs BuildKit), so the emulator fallback was not needed. The out-of-scope case runs as a
+  one-shot `sam local invoke` (a cold container, 14.2 s: the operator's machine opens the S3 tables in about 9 s). A cold
+  container cannot fit a README turn in the function's 28 s from here, so the README conversation and the injection case
+  run through `sam local start-lambda --warm-containers LAZY`, primed first by the warm-up event (README turns 9.2 s and
+  8.4 s). Result: 4 of 4 pass (`fixtures/rag/results/20261020T170201Z-sam-local.json`).
+- **Cold start.** The chat bundle is 3.7 MB (zod 1.1 MB, `ai` 0.7 MB, `langsmith` 0.5 MB, the Anthropic and Bedrock
+  providers 0.4 MB); evaluating it takes 155-170 ms locally (the API bundle 110 ms). At init the function also starts the
+  query layer's open (about 1-1.5 s on Lambda at T7, section 31; 8.7 s from the operator's machine to S3) and the secret
+  read, in parallel. `just warm` now also sends `c` (default 2) warm-ups to the chat function: each opens an instance, reads
+  the secret and runs the README turns' tool calls once (`AGENT_PRIME`: Austin, 5 miles, roofs over 15 years; open roofing
+  permits open 5 years or more), with no model call.
+- **Explorer prewarm.** The Agent tab sends `POST /v1/agent/chat` with `{"messages": []}` once when it opens: the contract
+  answers it `400`, and the handler opens and primes the instance (as `just warm` does, once per instance, bounded by the
+  turn deadline) before it answers. Cost: one request of the chat route's burst of 5 per page load, no Bedrock call, a few
+  seconds of Lambda on a cold instance and milliseconds on a warm one.
+- **Deviations from sections 20 and 21, recorded.** (1) A property is cited either from a property record or from a permit
+  record that names it (the permit's evidence item carries its `property_id`), so a permit list can say which properties
+  it is on. (2) The search-center rule is enforced, not only prompted: a search around a center that came back only as a
+  prefix or alias match is rejected until the user confirms, and a result whose exact match has under 50 parcels while
+  another candidate has ten times more tells the model to ask (on this roll "Westlake" matches a 3-parcel `WEST LAKE`
+  exactly; "Austin, TX" a 1-parcel `AUSTIN TX`). (3) The one retry runs in a model middleware (throttling or 5xx, only with
+  at least 1.5 s left); the AI SDK's own retries are off. (4) The circuit breaker is per instance: three consecutive turns
+  failing on Bedrock open it for 30 s, then one turn probes. (5) The personal view is a keyword rule on the latest question
+  (owner, deed, mailing, contact, phone, email and similar words). (6) The tool-text injection case needs the local runner's
+  query hook, so the live replay skips it; the history-injection case runs everywhere. (7) Tool-call logs keep ids,
+  numbers and flags as given and hash free-text parameters (`q`, `number`, `license_number`).
+- **Cost.** Per turn about $0.02 (Sonnet 4.6), $0.03-0.04 for a README turn; the worst day at the kill-switch limits
+  (200 turns) about $5-8 of Bedrock. Standing: the secret, $0.40 a month.

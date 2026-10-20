@@ -669,3 +669,60 @@ Disable termination protection on both stacks, then `npx --prefix apps/api/cdk c
 `npx --prefix apps/api/cdk cdk gc`. The buckets, image and log groups go; IPFS keeps the published bytes.
 
 </details>
+
+## 10. T9 — the agent (`POST /v1/agent/chat`)
+
+Built on 2026-10-20 (decisions.md section 32): the Bedrock agent on Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`), the
+golden set (`fixtures/rag/queries`, 22 cases; results in `fixtures/rag/results`), LangSmith tracing to the project
+`staraptor-agent`, and the explorer's Agent tab. Local results before deploy: the golden set passed both hard gates on
+24 of 24 turns with outcome accuracy 1.000, p95 12.6 s, README turns 7.3 s and 10.0 s; `just sam-local` passed 4 of 4.
+The secret `staraptor-agent/langsmith-api-key` exists already (2026-10-20). The coordinator deploys:
+
+```zsh
+export PATH="/opt/homebrew/bin:$PATH" AWS_PROFILE=cdk-lab
+just deploy-api
+just build-explorer deploy-web
+```
+
+`cdk deploy TravisApi` asks to approve the IAM changes (the chat role's Bedrock grant moves to the Sonnet 4.6 profile and
+its three foundation models; `secretsmanager:GetSecretValue` on the one secret) and adds the alarm
+`travis-chat-daily-tokens`, reserved concurrency 5 and the chat route throttle 0.4 a second, burst 5. `deploy-api` ends with
+`just warm`, which now also warms two chat instances (no model call). Run `just warm` again before a live demo. Then:
+
+### Check 1: the golden set against the live API
+
+```zsh
+out() { aws cloudformation describe-stacks --stack-name TravisApi --region us-east-2 --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+API_BASE=$(out ApiBase)
+npx tsx apps/api/scripts/golden.ts --target "$API_BASE" --label live 2>&1 | tail -40
+```
+
+Pass: `"pass": true` under `hard_gates`, `outcome_accuracy` at least 0.95, `latency_ms_p95` under 15000 and both
+`readme_turn_ms` under 15000 (21 cases: the tool-text injection case is local-only); the run writes its result file to
+`fixtures/rag/results/`.
+
+### Check 2: the README's two agent prompts in the explorer
+
+Open `ExplorerUrl`, tab **Agent**, click **Ask the agent** (the first README prompt is filled in), then, once it has
+answered, **Ask the agent** again (the second prompt is filled in next).
+
+Pass: both answers show the badge `answered`, a short answer with citation chips, assumptions (the Austin centroid's basis),
+limitations (BBB blocked on the second), an evidence table and `model us.anthropic.claude-sonnet-4-6` under Tool calls;
+while waiting a notice counts the seconds; each answer arrives in under about 15 s (a first question after a quiet period
+can take up to about 25 s).
+
+### Check 3: the LangSmith trace of that conversation
+
+Open https://smith.langchain.com, project `staraptor-agent`, **Threads**, the newest thread.
+
+Pass: two `staraptor-agent turn` runs in one thread, each with its model steps and tool calls (`resolve_search_center`,
+then `search_properties` or `search_permits`) as child runs, and no error.
+
+### Check 4: one CloudWatch log line of a turn
+
+```zsh
+aws logs filter-log-events --region us-east-2 --log-group-name "$(out ChatLogGroupName)" --filter-pattern '"chat turn"' --max-items 1 --query 'events[0].message' --output text
+```
+
+Pass: one JSON line with `"message":"chat turn"`, `outcome`, `steps`, `input_tokens`, `output_tokens`,
+`cache_read_tokens` and `turn_ms`, ids and hashes only (no question or answer text).
