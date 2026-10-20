@@ -323,6 +323,29 @@ export class TravisApi extends Stack {
       },
     });
 
+    // --- Warm-ups (decisions.md section 31): simultaneous invocations every few minutes keep that many API instances
+    // open and primed, so a reviewer's first call rarely meets a cold start ---
+    if (config.warm.instances > 0) {
+      const warmRole = new Role(this, 'WarmSchedulerRole', {
+        assumedBy: new ServicePrincipal('scheduler.amazonaws.com'),
+      });
+      warmRole.addToPolicy(
+        new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [apiFn.functionArn] }),
+      );
+      for (let i = 0; i < config.warm.instances; i++)
+        new CfnSchedule(this, `WarmApi${i}`, {
+          description: `API warm-up ${i + 1} of ${config.warm.instances}`,
+          scheduleExpression: `rate(${config.warm.everyMinutes} minutes)`,
+          flexibleTimeWindow: { mode: 'OFF' },
+          target: {
+            arn: apiFn.functionArn,
+            roleArn: warmRole.roleArn,
+            input: JSON.stringify({ warm: { hold_ms: 1500 } }),
+            retryPolicy: { maximumRetryAttempts: 0, maximumEventAgeInSeconds: 60 },
+          },
+        });
+    }
+
     // --- Alarms (8 of the 10 allowed; all self-resolving) ---
     const five = Duration.minutes(5);
     const mk = (id: string, alarm: ConstructorParameters<typeof Alarm>[2]) => {

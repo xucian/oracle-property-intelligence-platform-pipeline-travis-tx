@@ -54,6 +54,9 @@ describe.skipIf(!fixtureExists())('api.ts handler with API Gateway v2 events', (
       }),
     )) as { statusCode: number; body: string };
     expect(JSON.parse(mcp.body)).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
+    // the scheduled warm-up (decisions.md section 31): primes once per instance, then only holds
+    expect(await handler({ warm: { hold_ms: 0 } })).toEqual({ warmed: true, primed_now: true });
+    expect(await handler({ warm: {} })).toEqual({ warmed: true, primed_now: false });
     (await getQueries()).close();
   });
 });

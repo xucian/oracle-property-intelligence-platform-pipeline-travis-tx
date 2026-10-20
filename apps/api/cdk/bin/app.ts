@@ -10,11 +10,11 @@ const cdkDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const apiDir = resolve(cdkDir, '..');
 const config = loadConfig(resolve(process.env.CDK_CONFIG ?? join(cdkDir, 'config.json')));
 
-const dbPath = join(apiDir, 'build', 'db', 'travis.duckdb');
+const dbPath = join(apiDir, 'build', 'db', 'serving.duckdb');
 if (!existsSync(dbPath)) {
   console.warn(
     `[travis-cdk] ${dbPath} is missing. Synth works, but the image build and \`just deploy-api\` will fail.\n` +
-      `            Stage the DuckDB file first: \`just stage-db\` (deploy file) or \`just stage-db fixture\` (CI).`,
+      `            Stage it first: \`just stage-db\` (the serving file) or \`just stage-db fixture\` (CI).`,
   );
 }
 

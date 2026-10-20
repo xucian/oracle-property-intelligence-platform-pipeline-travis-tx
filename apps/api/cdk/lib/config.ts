@@ -31,6 +31,16 @@ export const ConfigSchema = z.object({
       threads: z.number().int().min(1).max(6).default(2),
     })
     .default({ memoryLimit: '2GB', threads: 2 }),
+  /**
+   * Scheduled warm-ups of the API function (decisions.md section 31): `instances` simultaneous invocations every
+   * `everyMinutes` keep that many instances open and primed; 0 turns them off. Each holds an instance for 1.5 s.
+   */
+  warm: z
+    .object({
+      instances: z.number().int().min(0).max(4).default(3),
+      everyMinutes: z.number().int().min(1).max(15).default(5),
+    })
+    .default({ instances: 3, everyMinutes: 5 }),
   /** 0 = unreserved. Set R > 0 only after reading `aws lambda get-account-settings` (section 21, Concurrency). */
   chatReservedConcurrency: z.number().int().min(0).max(5).default(0),
   throttle: z.object({

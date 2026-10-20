@@ -571,19 +571,20 @@ Before any deploy that changes it or the query layer, the agent runs the gate,
 Everything below is run by the operator from the repository root.
 `PROFILE` is the AWS profile, `ACCOUNT` its 12-digit id.
 
-### Setup (once)
+### Setup (once; done for account 561303652468 on 2026-10-20, so skip it there)
 
 ```zsh
-export PATH="/opt/homebrew/bin:$PATH" AWS_PROFILE=PROFILE
+export PATH="/opt/homebrew/bin:$PATH" AWS_PROFILE=cdk-lab
 brew install just
 colima start --arch aarch64 --cpu 4 --memory 8 --disk 60
 aws cloudformation describe-stacks --stack-name CDKToolkit --region us-east-2 --query 'Stacks[0].StackStatus' --output text
-cp apps/api/cdk/config.example.json apps/api/cdk/config.json
+cp -n apps/api/cdk/config.example.json apps/api/cdk/config.json
 ```
 
-If the fourth command says the stack does not exist: `npx --prefix apps/api/cdk cdk bootstrap aws://ACCOUNT/us-east-2`.
-In `apps/api/cdk/config.json` (gitignored) set `account` and `alarmEmails`; keep `chatReservedConcurrency` at `0` (the
-chat route is a placeholder until T9).
+`cdk-lab` is the profile of account 561303652468; for another account use its profile. `cp -n` never overwrites an
+existing `config.json`. If the fourth command says the stack does not exist:
+`npx --prefix apps/api/cdk cdk bootstrap aws://ACCOUNT/us-east-2`. In `apps/api/cdk/config.json` (gitignored) set
+`account` and `alarmEmails`; keep `chatReservedConcurrency` at `0` (the chat route is a placeholder until T9).
 
 ### Deploy
 
@@ -593,8 +594,10 @@ just deploy-api
 ```
 
 `deploy-api` exports the serving set, uploads its Parquet files to the deploy bucket, then pushes an image of about
-0.6 GB to ECR; CDK asks once to approve IAM changes (since section 30: `s3:GetObject` on the bucket's `serving/*` for
-both functions). Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
+0.6 GB to ECR; CDK asks to approve IAM changes when there are any (section 30: `s3:GetObject` on the bucket's
+`serving/*` for both functions; section 31: the warm-up schedules' role, `lambda:InvokeFunction` on the API function).
+Last it runs `just warm`, which opens and primes the configured number of API instances at once, so the slow first
+cold starts after a new image land on the deploy, not on a reviewer. Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
 afterwards (once; already done on 2026-10-20):
 
 ```zsh
@@ -617,8 +620,8 @@ curl -s "$API_BASE/v1/openapi.json" | shasum -a 256; shasum -a 256 packages/cont
 curl -s -X POST "$API_BASE/v1/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-06-18' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_properties","arguments":{"lat":30.2672,"lon":-97.7431,"radius_miles":1,"roof_age_min":15,"open_permits":false,"limit":2}}}' | head -c 900; echo
 ```
 
-Pass: `crm 200` (the CRM's main call, the first and cold request; the gate's model gives about 9 s), `meta 200` and
-`chat 503`, each first (cold) request under 25 s (keep the times for the PR); the two SHA-256
+Pass: `crm 200` within about 3 s (the CRM's main call on an instance the warm-up primed; decisions.md section 31),
+`meta 200` and `chat 503`, each under 25 s (keep the times for the PR); the two SHA-256
 lines equal; the MCP answer has `structuredContent` with two properties and no `isError`.
 
 ### Check 2: throttle, alarm, kill switch and the log trace

@@ -68,7 +68,7 @@ Order: deploy-build, `just deploy-api` (serving export and upload, then `cdk dep
 | `CHAT_FLAG_PARAM` | chat | SSM parameter name of the budget kill switch (`/travis/chat/budget-exhausted`, value `true`/`false`) |
 | `BEDROCK_MODEL_ID` | chat | stack parameter; unused until T9 |
 
-The image's `CMD` selects the handler: `api.handler` or `chat.handler`.
+The image's `CMD` selects the handler: `api.handler` or `chat.handler`. `api.handler` also accepts `{"warm": {"hold_ms": 1500}}` from the warm-up schedules and `just warm` (decisions.md section 31): it opens and, once per instance, primes the instance, and answers `{warmed, primed_now}`.
 
 ## T7 chat route
 
