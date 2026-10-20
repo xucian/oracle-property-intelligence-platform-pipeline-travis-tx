@@ -165,6 +165,9 @@ export class App {
   }
 
   async handle(req: HttpRequest): Promise<HttpResponse> {
+    // `$default` catches CORS preflights too; API Gateway adds the configured CORS headers, the status must be 2xx
+    if (req.method === 'OPTIONS')
+      return { statusCode: 204, headers: { 'x-request-id': req.requestId }, body: '' };
     const t0 = performance.now();
     let operation = 'unrouted';
     let res: HttpResponse;

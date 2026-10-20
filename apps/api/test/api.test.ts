@@ -309,3 +309,20 @@ describe.skipIf(!fixtureExists())('REST router and MCP endpoint on the fixture d
     });
   });
 });
+
+// The HTTP API's `$default` route also catches CORS preflights, so they reach this app; API Gateway adds the configured
+// CORS headers to its answer, but the browser rejects a preflight whose status is not 2xx (the Agent tab's POST, live).
+describe('CORS preflight', () => {
+  const app = new App({
+    queries: () => Promise.reject(new Error('a preflight must not open the query layer')),
+  });
+  it.each(['/v1/agent/chat', '/v1/mcp', '/v1/meta', '/v1/nothing'])(
+    'answers OPTIONS %s with 204 and no body',
+    async (path) => {
+      const res = await app.handle({ ...get(path), method: 'OPTIONS' });
+      expect(res.statusCode).toBe(204);
+      expect(res.body).toBe('');
+      expect(res.headers['x-request-id']).toBe('req-1');
+    },
+  );
+});
