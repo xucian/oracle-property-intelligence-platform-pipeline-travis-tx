@@ -31,7 +31,8 @@ export const RUN_RECORD_PATH = path.join(REPO_ROOT, 'runs', `${RUN_ID}.json`);
 export const PUBLICATION_PATH = path.join(REPO_ROOT, 'runs', `${RUN_ID}.publication.json`);
 
 export function requireKit(): void {
-  if (!existsSync(KIT_ROOT)) throw new Error(`kit runtime not found at ${KIT_ROOT} (set TRAVIS_KIT_ROOT)`);
+  if (!existsSync(KIT_ROOT))
+    throw new Error(`kit runtime not found at ${KIT_ROOT} (set TRAVIS_KIT_ROOT)`);
 }
 
 export function shardIds(): string[] {

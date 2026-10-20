@@ -18,7 +18,8 @@ export class NdjsonWriter {
   }
   async write(obj: unknown): Promise<void> {
     this.rows++;
-    if (!this.stream.write(JSON.stringify(obj) + '\n')) await new Promise<void>((r) => this.stream.once('drain', () => r()));
+    if (!this.stream.write(JSON.stringify(obj) + '\n'))
+      await new Promise<void>((r) => this.stream.once('drain', () => r()));
   }
   close(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -45,7 +46,8 @@ const num = (v: unknown): number | null => {
 
 /** `travis-attribution-key.v1`: first 32 hex of SHA-256 of trim(company) U+001F trim(phone); company falls back to the full name. */
 export function attributionKey(row: Record<string, string>): string {
-  const company = (row.contractor_company_name ?? '').trim() || (row.contractor_full_name ?? '').trim();
+  const company =
+    (row.contractor_company_name ?? '').trim() || (row.contractor_full_name ?? '').trim();
   const phone = (row.contractor_phone ?? '').trim();
   return createHash('sha256').update(`${company}\u001f${phone}`, 'utf8').digest('hex').slice(0, 32);
 }
@@ -58,18 +60,24 @@ export interface SeedStageResult {
  * One NDJSON row per TCAD seed row of every shard, with `tcad_row_sha256` = SHA-256 of the seed record text as stored in the
  * shard's seed.csv (the kit's `streamCsvRecords` record text, line terminator excluded).
  */
-export async function stageSeed(kit: Kit, shards: string[], outFile: string): Promise<SeedStageResult> {
+export async function stageSeed(
+  kit: Kit,
+  shards: string[],
+  outFile: string,
+): Promise<SeedStageResult> {
   const out = new NdjsonWriter(outFile);
   for (const shard of shards) {
     let header: string[] | null = null;
-    for await (const rec of kit.shards.streamCsvRecords(path.join(RUN_DIR, 'shards', shard, 'seed.csv')) as AsyncGenerator<{ text: string; fields: string[] }>) {
+    for await (const rec of kit.shards.streamCsvRecords(
+      path.join(RUN_DIR, 'shards', shard, 'seed.csv'),
+    ) as AsyncGenerator<{ text: string; fields: string[] }>) {
       if (!header) {
         header = rec.fields;
         continue;
       }
       const r: Record<string, string> = {};
       header.forEach((h, i) => (r[h] = rec.fields[i] ?? ''));
-      let mvqs: unknown = {};
+      let mvqs: unknown;
       try {
         mvqs = JSON.parse(r.multiValueQueryString || '{}');
       } catch {
@@ -97,7 +105,11 @@ export async function stageSeed(kit: Kit, shards: string[], outFile: string): Pr
         deed_dt: blank(r.source_deed_dt),
         url: r.url,
         snapshot_at: r.source_snapshot_at,
-        request: JSON.stringify({ method: r.method || 'GET', url: r.url, multiValueQueryString: mvqs }),
+        request: JSON.stringify({
+          method: r.method || 'GET',
+          url: r.url,
+          multiValueQueryString: mvqs,
+        }),
         row_sha256: createHash('sha256').update(rec.text, 'utf8').digest('hex'),
       });
     }
@@ -122,7 +134,11 @@ export interface PermitStageResult {
   roofAgeRows: number;
   byStatusGroup: Record<string, number>;
   byRoofClass: Record<string, number>;
-  roofAge: { eligible: number; byBasis: Record<string, number>; byConfidence: Record<string, number> };
+  roofAge: {
+    eligible: number;
+    byBasis: Record<string, number>;
+    byConfidence: Record<string, number>;
+  };
 }
 
 export async function stagePermitsAndRoofAge(o: PermitStageOptions): Promise<PermitStageResult> {
@@ -142,13 +158,20 @@ export async function stagePermitsAndRoofAge(o: PermitStageOptions): Promise<Per
     const parcels = o.parcelsByShard.get(shard) ?? [];
     const live = new Set(parcels.map((p) => p.id));
     const byProp = new Map<string, { row: any; link: any }[]>();
-    const rl = createInterface({ input: createReadStream(path.join(RUN_DIR, 'global', 'link-a1', `${shard}.jsonl`), { highWaterMark: 4 << 20 }), crlfDelay: Infinity });
+    const rl = createInterface({
+      input: createReadStream(path.join(RUN_DIR, 'global', 'link-a1', `${shard}.jsonl`), {
+        highWaterMark: 4 << 20,
+      }),
+      crlfDelay: Infinity,
+    });
     for await (const line of rl) {
       if (!line) continue;
       const d = JSON.parse(line) as any;
       const pid: string | null = d.link?.propertyId ?? null;
       if (pid === null || !live.has(pid)) {
-        o.log(`  ${shard}: permit ${d.row?.permit_number} links to ${pid}, which is not a published parcel`);
+        o.log(
+          `  ${shard}: permit ${d.row?.permit_number} links to ${pid}, which is not a published parcel`,
+        );
         res.skippedNotLive++;
         continue;
       }
@@ -180,7 +203,8 @@ export async function stagePermitsAndRoofAge(o: PermitStageOptions): Promise<Per
         issued_date: day(row.issue_date),
         expires_date: day(row.expiresdate),
         completed_date: ev.evidenceState === 'confirmed_present' ? ev.value : null,
-        completed_date_raw: ev.evidenceState === 'invalid_quarantined' ? blank(row.completed_date) : null,
+        completed_date_raw:
+          ev.evidenceState === 'invalid_quarantined' ? blank(row.completed_date) : null,
         completed_date_evidence: ev.evidenceState,
         lat: num(row.latitude),
         lon: num(row.longitude),

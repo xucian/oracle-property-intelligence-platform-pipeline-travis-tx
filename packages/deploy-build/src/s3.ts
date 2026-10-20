@@ -22,13 +22,24 @@ export interface UploadResult {
 
 const b64 = (hex: string) => Buffer.from(hex, 'hex').toString('base64');
 
-async function headChecksum(s3: S3Like, bucket: string, key: string): Promise<{ exists: boolean; checksum?: string; size?: number }> {
+async function headChecksum(
+  s3: S3Like,
+  bucket: string,
+  key: string,
+): Promise<{ exists: boolean; checksum?: string; size?: number }> {
   try {
-    const r = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }));
+    const r = await s3.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }),
+    );
     return { exists: true, checksum: r.ChecksumSHA256, size: r.ContentLength };
   } catch (e) {
     const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
-    if (err.name === 'NotFound' || err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) return { exists: false };
+    if (
+      err.name === 'NotFound' ||
+      err.name === 'NoSuchKey' ||
+      err.$metadata?.httpStatusCode === 404
+    )
+      return { exists: false };
     throw e;
   }
 }
@@ -41,7 +52,13 @@ export async function uploadAll(
   s3: S3Like,
   bucket: string,
   items: readonly UploadItem[],
-  opts: { concurrency?: number; cacheControl?: string; contentType?: string; dryRun?: boolean; log?: (m: string) => void } = {},
+  opts: {
+    concurrency?: number;
+    cacheControl?: string;
+    contentType?: string;
+    dryRun?: boolean;
+    log?: (m: string) => void;
+  } = {},
 ): Promise<UploadResult> {
   const result: UploadResult = { uploaded: [], skipped: [] };
   await mapLimit(items, opts.concurrency ?? 8, async (it) => {
@@ -52,13 +69,16 @@ export async function uploadAll(
         result.skipped.push(it.key);
         return;
       }
-      throw new Error(`${it.key} exists in ${bucket} with checksum ${head.checksum ?? '(none)'} but the input is ${want}: objects are immutable, refusing to overwrite`);
+      throw new Error(
+        `${it.key} exists in ${bucket} with checksum ${head.checksum ?? '(none)'} but the input is ${want}: objects are immutable, refusing to overwrite`,
+      );
     }
     if (opts.dryRun) {
       result.uploaded.push(it.key);
       return;
     }
-    if (statSync(it.file).size !== it.size) throw new Error(`${it.file}: size changed since verification`);
+    if (statSync(it.file).size !== it.size)
+      throw new Error(`${it.file}: size changed since verification`);
     await s3.send(
       new PutObjectCommand({
         Bucket: bucket,

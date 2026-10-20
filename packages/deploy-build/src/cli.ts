@@ -1,5 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -18,17 +29,32 @@ function codeHash(): string {
     path.join(SCHEMA_DIR, 'post_load.sql'),
     path.join(SCHEMA_DIR, 'src', 'text.ts'),
     ...readdirSync(path.join(REPO_ROOT, 'packages', 'deploy-build', 'src'))
-      .filter((f) => f.endsWith('.ts') && f !== 'cli.ts' && f !== 'fixture.ts' && f !== 'mirror.ts' && f !== 's3.ts')
+      .filter(
+        (f) =>
+          f.endsWith('.ts') &&
+          f !== 'cli.ts' &&
+          f !== 'fixture.ts' &&
+          f !== 'mirror.ts' &&
+          f !== 's3.ts',
+      )
       .sort()
       .map((f) => path.join(REPO_ROOT, 'packages', 'deploy-build', 'src', f)),
   ];
-  return sha256Hex(files.map((f) => `${path.basename(f)}:${sha256Hex(readFileSync(f))}`).join('\n'));
+  return sha256Hex(
+    files.map((f) => `${path.basename(f)}:${sha256Hex(readFileSync(f))}`).join('\n'),
+  );
 }
 
 function serverCommit(): string {
   try {
-    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
-    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    }).trim();
     return dirty ? `${head}-dirty` : head;
   } catch {
     return 'unknown';
@@ -45,7 +71,18 @@ function pointCurrent(dir: string): void {
   const tmp = `${link}.tmp`;
   rmSync(tmp, { force: true });
   symlinkSync(path.basename(dir), tmp);
-  if (existsSync(link) || (() => { try { lstatSync(link); return true; } catch { return false; } })()) rmSync(link, { recursive: false, force: true });
+  if (
+    existsSync(link) ||
+    (() => {
+      try {
+        lstatSync(link);
+        return true;
+      } catch {
+        return false;
+      }
+    })()
+  )
+    rmSync(link, { recursive: false, force: true });
   renameSync(tmp, link);
 }
 
@@ -61,7 +98,9 @@ async function commandBuild(args: string[]): Promise<void> {
   log('verifying inputs');
   const v = await verifyInputs(cache, log, subset ? { shards } : {});
   log(`inputs ok: ${v.files.length} files, ${v.parts.length} Parquet parts match the manifest`);
-  const inputsSha256 = sha256Hex(`${v.inputsSha256}\n${codeHash()}\n${subset ? shards.join(',') : 'all'}`);
+  const inputsSha256 = sha256Hex(
+    `${v.inputsSha256}\n${codeHash()}\n${subset ? shards.join(',') : 'all'}`,
+  );
   const deployId = (subset ? 'dev-' : '') + inputsSha256.slice(0, 16);
   const dir = path.join(DEPLOY_ROOT, deployId);
   const dbFile = path.join(dir, 'travis.duckdb');
@@ -72,22 +111,49 @@ async function commandBuild(args: string[]): Promise<void> {
     mkdirSync(dir, { recursive: true });
     const work = path.join(dir, 'work');
     const report = await buildDatabase({
-      dbFile, workDir: work, verified: v, deployId, inputsSha256, serverCommit: serverCommit(), shards, subset,
-      memoryLimit: flag(args, '--memory') ?? '18GB', threads: Number(flag(args, '--threads') ?? 8), log,
+      dbFile,
+      workDir: work,
+      verified: v,
+      deployId,
+      inputsSha256,
+      serverCommit: serverCommit(),
+      shards,
+      subset,
+      memoryLimit: flag(args, '--memory') ?? '18GB',
+      threads: Number(flag(args, '--threads') ?? 8),
+      log,
     });
     const duckdbSha256 = await sha256FileRaw(dbFile);
-    const manifestCid = JSON.parse(readFileSync(path.join(REPO_ROOT, 'runs', '20261018T143520Z-t5-full.publication.json'), 'utf8')).manifest.cid;
+    const manifestCid = JSON.parse(
+      readFileSync(
+        path.join(REPO_ROOT, 'runs', '20261018T143520Z-t5-full.publication.json'),
+        'utf8',
+      ),
+    ).manifest.cid;
     const deployJson = {
-      deploy_id: deployId, inputs_sha256: inputsSha256, deployed_at: new Date().toISOString(), server_commit: serverCommit(),
-      duckdb_version: '1.5.6', duckdb_sha256: duckdbSha256, run_id: '20261018T143520Z-t5-full', manifest_cid: manifestCid,
+      deploy_id: deployId,
+      inputs_sha256: inputsSha256,
+      deployed_at: new Date().toISOString(),
+      server_commit: serverCommit(),
+      duckdb_version: '1.5.6',
+      duckdb_sha256: duckdbSha256,
+      run_id: '20261018T143520Z-t5-full',
+      manifest_cid: manifestCid,
       bytes: statSync(dbFile).size,
-      build: { wall_seconds: Math.round((performance.now() - t0) / 1000), peak_rss_mb: report.peakRssMb, timings_ms: report.timings, subset },
+      build: {
+        wall_seconds: Math.round((performance.now() - t0) / 1000),
+        peak_rss_mb: report.peakRssMb,
+        timings_ms: report.timings,
+        subset,
+      },
       reconcile: report.reconcile,
     };
     writeFileSync(path.join(dir, 'deploy.json'), JSON.stringify(deployJson, null, 2) + '\n');
     rmSync(work, { recursive: true, force: true });
     if (!subset) pointCurrent(dir);
-    log(`built ${dbFile} (${(deployJson.bytes / 1e6).toFixed(0)} MB) in ${deployJson.build.wall_seconds}s, peak RSS ${report.peakRssMb} MB`);
+    log(
+      `built ${dbFile} (${(deployJson.bytes / 1e6).toFixed(0)} MB) in ${deployJson.build.wall_seconds}s, peak RSS ${report.peakRssMb} MB`,
+    );
   }
   cache.save();
   if (fixture) {
@@ -104,7 +170,9 @@ async function commandMirror(args: string[]): Promise<void> {
   const v = await verifyInputs(cache, log);
   const s3 = new S3Client({ region: flag(args, '--region') ?? 'us-east-2' });
   const r = await mirror(s3, bucket, v, { dryRun: args.includes('--dry-run'), log });
-  log(`mirror: ${r.uploaded.length} uploaded, ${r.skipped.length} already present with the same checksum`);
+  log(
+    `mirror: ${r.uploaded.length} uploaded, ${r.skipped.length} already present with the same checksum`,
+  );
 }
 
 async function commandStage(args: string[]): Promise<void> {
@@ -114,11 +182,21 @@ async function commandStage(args: string[]): Promise<void> {
   const v = await verifyInputs(cache, log);
   const s3 = new S3Client({ region: flag(args, '--region') ?? 'us-east-2' });
   const r = await stageInputs(s3, bucket, v, { dryRun: args.includes('--dry-run'), log });
-  log(`stage-inputs: ${r.uploaded.length} uploaded, ${r.skipped.length} already present; index key ${r.indexKey}`);
+  log(
+    `stage-inputs: ${r.uploaded.length} uploaded, ${r.skipped.length} already present; index key ${r.indexKey}`,
+  );
 }
 
 const [cmd = 'build-db', ...rest] = process.argv.slice(2);
-const main = cmd.startsWith('--') ? commandBuild([cmd, ...rest]) : cmd === 'build-db' ? commandBuild(rest) : cmd === 'mirror' ? commandMirror(rest) : cmd === 'stage-inputs' ? commandStage(rest) : Promise.reject(new Error(`unknown command ${cmd}`));
+const main = cmd.startsWith('--')
+  ? commandBuild([cmd, ...rest])
+  : cmd === 'build-db'
+    ? commandBuild(rest)
+    : cmd === 'mirror'
+      ? commandMirror(rest)
+      : cmd === 'stage-inputs'
+        ? commandStage(rest)
+        : Promise.reject(new Error(`unknown command ${cmd}`));
 main.catch((e) => {
   console.error(e instanceof Error ? e.message : e);
   process.exit(1);

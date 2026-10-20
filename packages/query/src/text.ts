@@ -19,7 +19,10 @@ export const FTS_CONFIG = {
 
 /** The query-side normalization (JavaScript). */
 export function normalizeText(s: string): string {
-  let out = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let out = s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   for (const a of TEXT_ALIASES) out = out.replace(new RegExp(a.pattern, 'g'), a.to);
   return out;
 }
@@ -27,7 +30,8 @@ export function normalizeText(s: string): string {
 /** The document-side normalization (DuckDB SQL expression over a column). */
 export function normalizeTextSql(col: string): string {
   let expr = `lower(strip_accents(${col}))`;
-  for (const a of TEXT_ALIASES) expr = `regexp_replace(${expr}, '${a.pattern.replace(/'/g, "''")}', '${a.to}', 'g')`;
+  for (const a of TEXT_ALIASES)
+    expr = `regexp_replace(${expr}, '${a.pattern.replace(/'/g, "''")}', '${a.to}', 'g')`;
   return expr;
 }
 
@@ -50,7 +54,8 @@ export function normalizeCenterNameSql(col: string): string {
  * every non-alphanumeric turned into a space. Kept here as a faithful copy of the kit function's rules so the query layer
  * has no kit dependency at run time; deploy-build asserts the two agree on every loaded name (see deploy-build verify).
  */
-const LEGAL_FORM_WORDS = /\b(L\.?L\.?C|INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|L\.?P|LLP|PLLC|P\.?C|PA|TRUST)\b\.?/g;
+const LEGAL_FORM_WORDS =
+  /\b(L\.?L\.?C|INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|L\.?P|LLP|PLLC|P\.?C|PA|TRUST)\b\.?/g;
 export function normalizeMatcherName(printed: string): string | null {
   const text = printed
     .normalize('NFKD')

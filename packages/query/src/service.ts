@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { DuckDBConnection, DuckDBInstance } from '@duckdb/node-api';
-import type { z } from 'zod';
 import type {
   BusinessRecord,
   Contractor,
@@ -24,11 +23,11 @@ import { TEXT_ALIASES, normalizeCenterName, normalizeMatcherName, normalizeText 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export type Row = Record<string, any>;
-export type PropertySearchParams = z.output<ReturnType<typeof searchPropertiesParams>>;
-export type PermitSearchParams = z.output<ReturnType<typeof searchPermitsParams>>;
-export type TextSearchParams = z.output<ReturnType<typeof textSearchParams>>;
-export type BusinessSearchParams = z.output<ReturnType<typeof businessSearchParams>>;
-export type LicenseSearchParams = z.output<ReturnType<typeof licenseSearchParams>>;
+export type PropertySearchParams = ReturnType<typeof searchPropertiesParams>['_output'];
+export type PermitSearchParams = ReturnType<typeof searchPermitsParams>['_output'];
+export type TextSearchParams = ReturnType<typeof textSearchParams>['_output'];
+export type BusinessSearchParams = ReturnType<typeof businessSearchParams>['_output'];
+export type LicenseSearchParams = ReturnType<typeof licenseSearchParams>['_output'];
 
 export interface QueryOptions {
   dbPath: string;
@@ -44,21 +43,31 @@ export interface QueryOptions {
 
 export const DEFAULT_LIMITS: Meta['limits'] = {
   stage: { rate: 20, burst: 40 },
-  routes: { '/v1/agent/chat': { rate: 1, burst: 3 }, '/v1/permits/text-search': { rate: 5, burst: 10 } },
+  routes: {
+    '/v1/agent/chat': { rate: 1, burst: 3 },
+    '/v1/permits/text-search': { rate: 5, burst: 10 },
+  },
   mcp: { search_permit_text: { rate: 5, burst: 10 } },
   chat: { max_output_tokens: 1500, turn_deadline_seconds: 25 },
 };
 
-const ROOFING = ['primary_roof_replacement', 'primary_roof_new_construction', 'repair_or_coating', 'accessory_roof'];
 const DATASET_URL = 'https://data.austintexas.gov/resource/3syk-w9eu';
 
 const lit = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const jparse = (s: unknown): any => (typeof s === 'string' ? JSON.parse(s) : s);
 
-function httpRequest(s: unknown): { method: string; url: string; multiValueQueryString: Record<string, string[]> } {
+function httpRequest(s: unknown): {
+  method: string;
+  url: string;
+  multiValueQueryString: Record<string, string[]>;
+} {
   const o = jparse(s) ?? {};
-  return { method: o.method ?? 'GET', url: o.url ?? '', multiValueQueryString: o.multiValueQueryString ?? {} };
+  return {
+    method: o.method ?? 'GET',
+    url: o.url ?? '',
+    multiValueQueryString: o.multiValueQueryString ?? {},
+  };
 }
 
 const HAV = (lat0: number, lon0: number, latC: string, lonC: string) =>
@@ -96,10 +105,21 @@ export class Queries {
     const instance = await DuckDBInstance.create(opts.dbPath, config);
     const conn = await instance.connect();
     await conn.run('LOAD fts');
-    const dep = (await conn.runAndReadAll('SELECT deploy_id FROM deploy')).getRowObjectsJson() as Row[];
+    const dep = (
+      await conn.runAndReadAll('SELECT deploy_id FROM deploy')
+    ).getRowObjectsJson() as Row[];
     if (dep.length !== 1) throw new Error('deploy table must hold exactly one row');
-    const sw = (await conn.runAndReadAll('SELECT sw FROM fts_main_permit_text.stopwords')).getRowObjectsJson() as Row[];
-    return new Queries(instance, conn, opts, dep[0]!.deploy_id as string, new Set(sw.map((r) => String(r.sw))), Math.round(performance.now() - t0));
+    const sw = (
+      await conn.runAndReadAll('SELECT sw FROM fts_main_permit_text.stopwords')
+    ).getRowObjectsJson() as Row[];
+    return new Queries(
+      instance,
+      conn,
+      opts,
+      dep[0]!.deploy_id as string,
+      new Set(sw.map((r) => String(r.sw))),
+      Math.round(performance.now() - t0),
+    );
   }
 
   close(): void {
@@ -125,7 +145,9 @@ export class Queries {
 
   // ---- cursors ----------------------------------------------------------------------------------------------------
   private encodeCursor(offset: number, asOf: string): string {
-    return Buffer.from(JSON.stringify({ d: this.deployId, a: asOf, o: offset })).toString('base64url');
+    return Buffer.from(JSON.stringify({ d: this.deployId, a: asOf, o: offset })).toString(
+      'base64url',
+    );
   }
   private decodeCursor(cursor: string | undefined, asOf: string): number {
     if (cursor === undefined) return 0;
@@ -135,32 +157,84 @@ export class Queries {
     } catch {
       throw badRequest('invalid_cursor', 'the cursor is not one this server issued');
     }
-    if (typeof c?.d !== 'string' || typeof c?.a !== 'string' || !Number.isInteger(c?.o) || c.o < 0) throw badRequest('invalid_cursor', 'the cursor is not one this server issued');
+    if (typeof c?.d !== 'string' || typeof c?.a !== 'string' || !Number.isInteger(c?.o) || c.o < 0)
+      throw badRequest('invalid_cursor', 'the cursor is not one this server issued');
     if (c.d !== this.deployId || c.a !== asOf) throw badRequest('stale_cursor');
     return c.o as number;
   }
-  private page<T>(items: T[], total: number, offset: number, limit: number, asOf: string): { items: T[]; total: number; next_cursor: string | null } {
-    return { items, total, next_cursor: offset + items.length < total && items.length > 0 ? this.encodeCursor(offset + limit, asOf) : null };
+  private page<T>(
+    items: T[],
+    total: number,
+    offset: number,
+    limit: number,
+    asOf: string,
+  ): { items: T[]; total: number; next_cursor: string | null } {
+    return {
+      items,
+      total,
+      next_cursor:
+        offset + items.length < total && items.length > 0
+          ? this.encodeCursor(offset + limit, asOf)
+          : null,
+    };
   }
 
   // ---- shared lookups ---------------------------------------------------------------------------------------------------
-  private deployRow = () => this.memo('deploy', async () => (await this.all('SELECT * FROM deploy'))[0]!);
+  private deployRow = () =>
+    this.memo('deploy', async () => (await this.all('SELECT * FROM deploy'))[0]!);
   private bounds = () =>
-    this.memo('bounds', async () => jparse((await this.deployRow()).area_bounds) as { min_lat: number; max_lat: number; min_lon: number; max_lon: number });
-  private async bbb(): Promise<{ rating: null; status: 'blocked' | 'unavailable' | 'available'; incomplete_reason: string | null; note: string | null }> {
+    this.memo(
+      'bounds',
+      async () =>
+        jparse((await this.deployRow()).area_bounds) as {
+          min_lat: number;
+          max_lat: number;
+          min_lon: number;
+          max_lon: number;
+        },
+    );
+  private async bbb(): Promise<{
+    rating: null;
+    status: 'blocked' | 'unavailable' | 'available';
+    incomplete_reason: string | null;
+    note: string | null;
+  }> {
     const d = await this.deployRow();
-    return { rating: null, status: d.bbb_status, incomplete_reason: d.bbb_incomplete_reason ?? null, note: d.bbb_note ?? null };
+    return {
+      rating: null,
+      status: d.bbb_status,
+      incomplete_reason: d.bbb_incomplete_reason ?? null,
+      note: d.bbb_note ?? null,
+    };
   }
   /** `outside Travis County` when the center is outside the box derived from the loaded parcels. */
-  private async areaNote(lat?: number, lon?: number): Promise<{ outside: boolean; note: string | null }> {
+  private async areaNote(
+    lat?: number,
+    lon?: number,
+  ): Promise<{ outside: boolean; note: string | null }> {
     if (lat === undefined || lon === undefined) return { outside: false, note: null };
     const b = await this.bounds();
     const outside = lat < b.min_lat || lat > b.max_lat || lon < b.min_lon || lon > b.max_lon;
     return { outside, note: outside ? 'outside Travis County' : null };
   }
-  private async source(dataset: string, recordId: string, url: string, fetchedAt: string, requestIdentifier: string, req: unknown) {
+  private async source(
+    dataset: string,
+    recordId: string,
+    url: string,
+    fetchedAt: string,
+    requestIdentifier: string,
+    req: unknown,
+  ) {
     const d = await this.deployRow();
-    return { dataset, record_id: recordId, url, fetched_at: fetchedAt, run_id: d.run_id as string, request_identifier: requestIdentifier, source_http_request: httpRequest(req) };
+    return {
+      dataset,
+      record_id: recordId,
+      url,
+      fetched_at: fetchedAt,
+      run_id: d.run_id as string,
+      request_identifier: requestIdentifier,
+      source_http_request: httpRequest(req),
+    };
   }
 
   // ---- meta, runs, manifest ------------------------------------------------------------------------------------------------
@@ -170,51 +244,119 @@ export class Queries {
       const runs = await this.runs();
       const run = runs.find((r) => r.run_id === d.run_id)!;
       const counts: Row = {};
-      for (const r of await this.all('SELECT name, value FROM meta_counts')) counts[r.name] = Number(r.value);
+      for (const r of await this.all('SELECT name, value FROM meta_counts'))
+        counts[r.name] = Number(r.value);
       const bySource: Row = {};
       for (const r of await this.all('SELECT * FROM source_loads ORDER BY source_key')) {
         bySource[r.source_key] = {
-          kind: r.kind, dataset: r.dataset, rows_loaded: Number(r.rows_loaded), in_scope_rows: Number(r.in_scope_rows),
-          out_of_county_candidate_rows: Number(r.out_of_county_candidate_rows), withheld_record_ids: Number(r.withheld_record_ids),
-          candidates: Number(r.candidates), fetched_at: r.fetched_at,
+          kind: r.kind,
+          dataset: r.dataset,
+          rows_loaded: Number(r.rows_loaded),
+          in_scope_rows: Number(r.in_scope_rows),
+          out_of_county_candidate_rows: Number(r.out_of_county_candidate_rows),
+          withheld_record_ids: Number(r.withheld_record_ids),
+          candidates: Number(r.candidates),
+          fetched_at: r.fetched_at,
         };
       }
       const groups: Row = {};
-      for (const r of await this.all('SELECT * FROM group_roots ORDER BY group_name, shard')) groups[`${r.group_name}/${r.shard}`] = { cid: r.archive_cid, schema: r.schema_cid, tables: r.tables_cid };
+      for (const r of await this.all('SELECT * FROM group_roots ORDER BY group_name, shard'))
+        groups[`${r.group_name}/${r.shard}`] = {
+          cid: r.archive_cid,
+          schema: r.schema_cid,
+          tables: r.tables_cid,
+        };
       const ev = (k: string) => {
         const o: Record<string, number> = {};
-        for (const [name, v] of Object.entries(counts)) if (name.startsWith(`evidence_states.${k}.`)) o[name.slice(`evidence_states.${k}.`.length)] = v as number;
+        for (const [name, v] of Object.entries(counts))
+          if (name.startsWith(`evidence_states.${k}.`))
+            o[name.slice(`evidence_states.${k}.`.length)] = v as number;
         return o;
       };
       const ur = (k: string) => (counts[`unlinked_reasons.${k}`] as number) ?? 0;
       const limitations = (await this.all('SELECT * FROM limitations ORDER BY seq')).map((l) => ({
-        source: l.source, availability: l.availability, source_access_status: l.source_access_status, incomplete_reason: l.incomplete_reason ?? null,
-        detail: l.detail, evidence: l.evidence ?? null, records_request: l.records_request ? jparse(l.records_request) : null,
+        source: l.source,
+        availability: l.availability,
+        source_access_status: l.source_access_status,
+        incomplete_reason: l.incomplete_reason ?? null,
+        detail: l.detail,
+        evidence: l.evidence ?? null,
+        records_request: l.records_request ? jparse(l.records_request) : null,
       }));
       const reads = (await this.all('SELECT * FROM deploy_reads ORDER BY dataset')).map((r) => ({
-        dataset: r.dataset, url: r.url, fetched_at: r.fetched_at, sha256: r.sha256, rows: Number(r.rows), matched: Number(r.matched),
-        unavailable: Number(r.unavailable), conflicting: Number(r.conflicting),
+        dataset: r.dataset,
+        url: r.url,
+        fetched_at: r.fetched_at,
+        sha256: r.sha256,
+        rows: Number(r.rows),
+        matched: Number(r.matched),
+        unavailable: Number(r.unavailable),
+        conflicting: Number(r.conflicting),
       }));
       const sha = this.duckdbSha256() ?? d.duckdb_sha256 ?? '';
       const countKeys = [
-        'properties', 'with_coordinates', 'with_roof_age', 'permits', 'permits_joined_to_property', 'permits_unmatched', 'permits_needs_review',
-        'roofing_permits', 'open_roofing_permits', 'stalled_roofing_permits', 'roofing_permits_needs_review', 'owners', 'permit_contractor_attributions',
-        'registry_rows_loaded', 'bbb_profiles', 'business_records', 'license_records', 'contractors_with_registry_candidate', 'contractors_with_license_candidate',
+        'properties',
+        'with_coordinates',
+        'with_roof_age',
+        'permits',
+        'permits_joined_to_property',
+        'permits_unmatched',
+        'permits_needs_review',
+        'roofing_permits',
+        'open_roofing_permits',
+        'stalled_roofing_permits',
+        'roofing_permits_needs_review',
+        'owners',
+        'permit_contractor_attributions',
+        'registry_rows_loaded',
+        'bbb_profiles',
+        'business_records',
+        'license_records',
+        'contractors_with_registry_candidate',
+        'contractors_with_license_candidate',
       ];
       const meta = {
-        county: d.county, fips: d.fips,
+        county: d.county,
+        fips: d.fips,
         run: { run_id: run.run_id, started_at: run.started_at, finished_at: run.finished_at },
-        counts: { ...Object.fromEntries(countKeys.map((k) => [k, (counts[k] as number) ?? 0])), by_source: bySource },
-        groups, manifest_cid: d.manifest_cid, atlas: null,
-        evidence_states: { completed_date: ev('completed_date'), status_current: ev('status_current'), tcad_id: ev('tcad_id') },
-        unlinked_reasons: { no_candidate: ur('no_candidate'), multiple_candidates: ur('multiple_candidates'), invalid_quarantined: ur('invalid_quarantined'), out_of_county: ur('out_of_county') },
-        limitations, cli_commit: d.cli_commit, lexicon_manifest_url: d.lexicon_manifest_url, kit_commit: d.kit_commit,
+        counts: {
+          ...Object.fromEntries(countKeys.map((k) => [k, (counts[k] as number) ?? 0])),
+          by_source: bySource,
+        },
+        groups,
+        manifest_cid: d.manifest_cid,
+        atlas: null,
+        evidence_states: {
+          completed_date: ev('completed_date'),
+          status_current: ev('status_current'),
+          tcad_id: ev('tcad_id'),
+        },
+        unlinked_reasons: {
+          no_candidate: ur('no_candidate'),
+          multiple_candidates: ur('multiple_candidates'),
+          invalid_quarantined: ur('invalid_quarantined'),
+          out_of_county: ur('out_of_county'),
+        },
+        limitations,
+        cli_commit: d.cli_commit,
+        lexicon_manifest_url: d.lexicon_manifest_url,
+        kit_commit: d.kit_commit,
         deploy: {
-          deploy_id: d.deploy_id, inputs_sha256: d.inputs_sha256, deployed_at: d.deployed_at, server_commit: d.server_commit,
-          duckdb_version: d.duckdb_version, duckdb_sha256: sha,
+          deploy_id: d.deploy_id,
+          inputs_sha256: d.inputs_sha256,
+          deployed_at: d.deployed_at,
+          server_commit: d.server_commit,
+          duckdb_version: d.duckdb_version,
+          duckdb_sha256: sha,
           text_index: {
             rows: Number(d.text_index_rows),
-            config: { stemmer: d.text_index_stemmer, stopwords: d.text_index_stopwords, ignore: d.text_index_ignore, lower: d.text_index_lower, strip_accents: d.text_index_strip_accents },
+            config: {
+              stemmer: d.text_index_stemmer,
+              stopwords: d.text_index_stopwords,
+              ignore: d.text_index_ignore,
+              lower: d.text_index_lower,
+              strip_accents: d.text_index_strip_accents,
+            },
             alias_version: d.text_index_alias_version,
           },
           reads,
@@ -242,10 +384,18 @@ export class Queries {
   /** Every run that ever published, newest first, mapped onto the contract's Run shape. */
   runs(): Promise<Run[]> {
     return this.memo('runs', async () => {
-      const rows = await this.all('SELECT run_id, manifest_cid, record_json FROM runs ORDER BY run_id DESC');
+      const rows = await this.all(
+        'SELECT run_id, manifest_cid, record_json FROM runs ORDER BY run_id DESC',
+      );
       const groupRows = await this.all('SELECT * FROM group_roots ORDER BY group_name, shard');
       const d = await this.deployRow();
-      return rows.map((r) => normalizeRun(JSON.parse(r.record_json), r.manifest_cid, r.run_id === d.run_id ? groupRows : [])) as Run[];
+      return rows.map((r) =>
+        normalizeRun(
+          JSON.parse(r.record_json),
+          r.manifest_cid,
+          r.run_id === d.run_id ? groupRows : [],
+        ),
+      ) as Run[];
     });
   }
   async listRuns(): Promise<{ items: Run[] }> {
@@ -271,7 +421,15 @@ export class Queries {
         UNION ALL SELECT c.*, 'alias', 2 FROM search_centers c JOIN search_center_aliases a ON a.center_id = c.center_id WHERE a.alias_norm = ${lit(norm)})
       SELECT * FROM m QUALIFY row_number() OVER (PARTITION BY center_id ORDER BY rk) = 1 ORDER BY rk, parcel_count DESC, center_id LIMIT 25`);
     return {
-      items: rows.map((r) => ({ name: r.name, kind: r.kind, match_type: r.match_type, lat: r.lat, lon: r.lon, parcel_count: Number(r.parcel_count), basis: r.basis })),
+      items: rows.map((r) => ({
+        name: r.name,
+        kind: r.kind,
+        match_type: r.match_type,
+        lat: r.lat,
+        lon: r.lon,
+        parcel_count: Number(r.parcel_count),
+        basis: r.basis,
+      })),
     };
   }
 
@@ -283,28 +441,70 @@ export class Queries {
   private async propertySummary(r: Row): Promise<PropertySummary> {
     const anchor =
       r.roof_age_anchor_permit_id !== null && r.roof_age_anchor_permit_id !== undefined
-        ? { permit_id: r.roof_age_anchor_permit_id, date: r.roof_age_anchor_date, date_field: r.roof_age_anchor_date_field }
+        ? {
+            permit_id: r.roof_age_anchor_permit_id,
+            date: r.roof_age_anchor_date,
+            date_field: r.roof_age_anchor_date_field,
+          }
         : r.roof_age_anchor_year_built
           ? { source_field: 'year_built' as const }
           : null;
     return {
-      property_id: r.property_id, geo_id: r.geo_id ?? null,
-      address: { line1: r.situs_line1 ?? null, city: r.situs_city ?? null, zip: r.situs_zip ?? null },
-      lat: r.lat ?? null, lon: r.lon ?? null, coordinate_basis: r.coordinate_basis ?? null, year_built: r.year_built ?? null,
-      roof_year: r.roof_year ?? null, roof_age_years: r.roof_age_years ?? null, roof_age_basis: r.roof_age_basis ?? null,
-      roof_age_confidence: r.roof_age_confidence, roof_age_anchor: anchor, roof_age_as_of: r.roof_age_as_of,
+      property_id: r.property_id,
+      geo_id: r.geo_id ?? null,
+      address: {
+        line1: r.situs_line1 ?? null,
+        city: r.situs_city ?? null,
+        zip: r.situs_zip ?? null,
+      },
+      lat: r.lat ?? null,
+      lon: r.lon ?? null,
+      coordinate_basis: r.coordinate_basis ?? null,
+      year_built: r.year_built ?? null,
+      roof_year: r.roof_year ?? null,
+      roof_age_years: r.roof_age_years ?? null,
+      roof_age_basis: r.roof_age_basis ?? null,
+      roof_age_confidence: r.roof_age_confidence,
+      roof_age_anchor: anchor,
+      roof_age_as_of: r.roof_age_as_of,
       roof_age_caveats: r.roof_age_caveats ?? [],
       last_roofing_permit: r.last_roofing_permit_id
-        ? { permit_id: r.last_roofing_permit_id, date: r.last_roofing_permit_date ?? null, status_group: r.last_roofing_permit_status_group, roof_work_class: r.last_roofing_permit_class }
+        ? {
+            permit_id: r.last_roofing_permit_id,
+            date: r.last_roofing_permit_date ?? null,
+            status_group: r.last_roofing_permit_status_group,
+            roof_work_class: r.last_roofing_permit_class,
+          }
         : null,
-      roofing_permit_counts: { open: r.roofing_open_count, stalled: r.roofing_stalled_count, closed: r.roofing_closed_count, needs_review: r.roofing_needs_review_count },
-      owner_tenure_years: num(r.owner_tenure_years), owner_absentee: r.owner_absentee ?? null, owner_out_of_area: r.owner_out_of_area ?? null,
+      roofing_permit_counts: {
+        open: r.roofing_open_count,
+        stalled: r.roofing_stalled_count,
+        closed: r.roofing_closed_count,
+        needs_review: r.roofing_needs_review_count,
+      },
+      owner_tenure_years: num(r.owner_tenure_years),
+      owner_absentee: r.owner_absentee ?? null,
+      owner_out_of_area: r.owner_out_of_area ?? null,
       has_bbb_contractor: r.has_bbb_contractor,
-      source: await this.source(r.source_dataset, r.property_id, r.source_url, r.source_fetched_at, r.request_identifier, r.source_http_request),
-      record_cid: r.record_cid, property_cid: r.property_cid, data_group_cid: r.data_group_cid,
+      source: await this.source(
+        r.source_dataset,
+        r.property_id,
+        r.source_url,
+        r.source_fetched_at,
+        r.request_identifier,
+        r.source_http_request,
+      ),
+      record_cid: r.record_cid,
+      property_cid: r.property_cid,
+      data_group_cid: r.data_group_cid,
       unpublished_source: {
-        dataset: r.tcad_dataset, url: r.tcad_url, fetched_at: r.tcad_fetched_at, source_http_request: httpRequest(r.tcad_source_http_request),
-        row_sha256: r.tcad_row_sha256, evidence_state: r.tcad_evidence_state, fields: r.tcad_fields,
+        dataset: r.tcad_dataset,
+        url: r.tcad_url,
+        fetched_at: r.tcad_fetched_at,
+        source_http_request: httpRequest(r.tcad_source_http_request),
+        row_sha256: r.tcad_row_sha256,
+        evidence_state: r.tcad_evidence_state,
+        fields: r.tcad_fields,
       },
     } as PropertySummary;
   }
@@ -317,14 +517,26 @@ export class Queries {
     const center = p.lat !== undefined && p.lon !== undefined ? { lat: p.lat, lon: p.lon } : null;
     const dist = center ? HAV(center.lat, center.lon, 'lat', 'lon') : 'NULL::DOUBLE';
     const conds: string[] = [];
-    if (center) conds.push('lat IS NOT NULL', bbox(center.lat, center.lon, p.radius_miles, 'lat', 'lon'));
-    const permitClause = p.open_permits ? '(roofing_open_count > 0 OR roofing_stalled_count > 0)' : null;
+    if (center)
+      conds.push('lat IS NOT NULL', bbox(center.lat, center.lon, p.radius_miles, 'lat', 'lon'));
+    const permitClause = p.open_permits
+      ? '(roofing_open_count > 0 OR roofing_stalled_count > 0)'
+      : null;
     const ageClause = p.roof_age_min > 0 ? `roof_age_years > ${p.roof_age_min}` : null;
     const match = [ageClause, permitClause].filter(Boolean);
     if (match.length) conds.push(`(${match.join(' OR ')})`);
-    if (p.owner_tenure_min !== undefined) conds.push(`deed_date IS NOT NULL AND date_diff('day', deed_date, DATE ${lit(asOf)}) / 365.25 >= ${p.owner_tenure_min}`);
-    if (p.absentee_owner !== undefined) conds.push(`owner_absentee IS NOT DISTINCT FROM ${p.absentee_owner ? 'TRUE' : 'FALSE'} AND owner_absentee IS NOT NULL`);
-    if (p.out_of_area_owner !== undefined) conds.push(`owner_out_of_area IS NOT DISTINCT FROM ${p.out_of_area_owner ? 'TRUE' : 'FALSE'} AND owner_out_of_area IS NOT NULL`);
+    if (p.owner_tenure_min !== undefined)
+      conds.push(
+        `deed_date IS NOT NULL AND date_diff('day', deed_date, DATE ${lit(asOf)}) / 365.25 >= ${p.owner_tenure_min}`,
+      );
+    if (p.absentee_owner !== undefined)
+      conds.push(
+        `owner_absentee IS NOT DISTINCT FROM ${p.absentee_owner ? 'TRUE' : 'FALSE'} AND owner_absentee IS NOT NULL`,
+      );
+    if (p.out_of_area_owner !== undefined)
+      conds.push(
+        `owner_out_of_area IS NOT DISTINCT FROM ${p.out_of_area_owner ? 'TRUE' : 'FALSE'} AND owner_out_of_area IS NOT NULL`,
+      );
     const where = conds.join(' AND ') || 'TRUE';
     const base = `(SELECT ${this.propCols(asOf)}, ${dist} AS distance_miles FROM properties p WHERE ${where.replace(/\b(lat|lon)\b/g, 'p.$1')})`;
     const within = center ? `WHERE distance_miles <= ${p.radius_miles}` : '';
@@ -341,7 +553,8 @@ export class Queries {
       const s = (await this.propertySummary(r)) as any;
       s.distance_miles = center ? Math.round(Number(r.distance_miles) * 1000) / 1000 : null;
       const reasons: string[] = [];
-      if (ageClause && r.roof_age_years !== null && r.roof_age_years > p.roof_age_min) reasons.push('aged_roof');
+      if (ageClause && r.roof_age_years !== null && r.roof_age_years > p.roof_age_min)
+        reasons.push('aged_roof');
       if (p.open_permits) {
         if (r.roofing_open_count > 0) {
           reasons.push('open_roofing_permit');
@@ -349,7 +562,8 @@ export class Queries {
         }
         if (r.roofing_stalled_count > 0) {
           reasons.push('stalled_roofing_permit');
-          if (r.roofing_open_count === 0 && Number(r.stalled_roofing_max_duration_days) >= longDays) reasons.push('long_open_roofing_permit');
+          if (r.roofing_open_count === 0 && Number(r.stalled_roofing_max_duration_days) >= longDays)
+            reasons.push('long_open_roofing_permit');
         }
       }
       if (p.owner_tenure_min !== undefined) reasons.push('owner_tenure');
@@ -362,12 +576,21 @@ export class Queries {
   }
 
   private async propertyRow(where: string): Promise<Row | null> {
-    const rows = await this.all(`SELECT ${this.propCols(this.today())} FROM properties p WHERE ${where}`);
+    const rows = await this.all(
+      `SELECT ${this.propCols(this.today())} FROM properties p WHERE ${where}`,
+    );
     return rows[0] ?? null;
   }
 
-  async getProperty(by: { property_id?: string; geo_id?: string }, permitLimit = 50): Promise<PropertyDetail> {
-    const r = await this.propertyRow(by.property_id !== undefined ? `p.property_id = ${lit(by.property_id)}` : `p.geo_id = ${lit(by.geo_id ?? '')}`);
+  async getProperty(
+    by: { property_id?: string; geo_id?: string },
+    permitLimit = 50,
+  ): Promise<PropertyDetail> {
+    const r = await this.propertyRow(
+      by.property_id !== undefined
+        ? `p.property_id = ${lit(by.property_id)}`
+        : `p.geo_id = ${lit(by.geo_id ?? '')}`,
+    );
     if (!r) throw notFound(`property ${by.property_id ?? by.geo_id}`);
     const asOf = this.today();
     const summary = (await this.propertySummary(r)) as any;
@@ -375,54 +598,137 @@ export class Queries {
       ORDER BY is_roofing DESC, open_since DESC NULLS LAST, permit_id ASC LIMIT ${permitLimit}`);
     const permits = await this.permitSummaries(prows, asOf);
     const total = Number(r.permit_count);
-    const mailing = [r.mailing_line1, r.mailing_line2, r.mailing_city, r.mailing_state, r.mailing_zip];
+    const mailing = [
+      r.mailing_line1,
+      r.mailing_line2,
+      r.mailing_city,
+      r.mailing_state,
+      r.mailing_zip,
+    ];
     const fields: string[] = (r.tcad_fields as string[]).filter((f) => f !== 'geo_id');
     const detail = {
       ...summary,
       owner: {
         owner_name: r.owner_name ?? null,
-        mailing_address: mailing.every((x) => x === null || x === undefined) ? null : { line1: r.mailing_line1 ?? null, line2: r.mailing_line2 ?? null, city: r.mailing_city ?? null, state: r.mailing_state ?? null, zip: r.mailing_zip ?? null },
-        deed_date: r.deed_date ?? null, owner_tenure_years: num(r.owner_tenure_years), owner_absentee: r.owner_absentee ?? null, owner_out_of_area: r.owner_out_of_area ?? null,
+        mailing_address: mailing.every((x) => x === null || x === undefined)
+          ? null
+          : {
+              line1: r.mailing_line1 ?? null,
+              line2: r.mailing_line2 ?? null,
+              city: r.mailing_city ?? null,
+              state: r.mailing_state ?? null,
+              zip: r.mailing_zip ?? null,
+            },
+        deed_date: r.deed_date ?? null,
+        owner_tenure_years: num(r.owner_tenure_years),
+        owner_absentee: r.owner_absentee ?? null,
+        owner_out_of_area: r.owner_out_of_area ?? null,
         source: summary.source,
         unpublished_source: { ...summary.unpublished_source, fields },
       },
-      permits, permits_total: total, permits_truncated: total > permits.length,
+      permits,
+      permits_total: total,
+      permits_truncated: total > permits.length,
     };
     return detail as PropertyDetail;
   }
 
   // ---- permits ---------------------------------------------------------------------------------------------------------------------
-  private async permitSummaries(rows: Row[], asOf: string, extra?: (r: Row) => Row): Promise<PermitSummary[]> {
+  private async permitSummaries(
+    rows: Row[],
+    asOf: string,
+    extra?: (r: Row) => Row,
+  ): Promise<PermitSummary[]> {
     const bbb = await this.bbb();
     const asOfMs = Date.parse(`${asOf}T00:00:00Z`);
-    const days = (from: string) => Math.round((asOfMs - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+    const days = (from: string) =>
+      Math.round((asOfMs - Date.parse(`${from}T00:00:00Z`)) / 86400000);
     const out: PermitSummary[] = [];
     for (const r of rows) {
       const open = r.status_group === 'open' && r.open_since ? days(r.open_since) : null;
       const stalled = r.status_group === 'stalled' ? num(r.static_duration_days) : null;
       const s: any = {
-        permit_id: r.permit_id, geo_id: r.geo_id ?? null, property_id: r.property_id,
-        property_link: { match_method: r.link_match_method, normalization_version: r.link_normalization_version ?? null, confidence: r.link_confidence },
-        permit_type: r.permit_type ?? '', permit_class: r.permit_class ?? '', work_class: r.work_class ?? '', description: r.description ?? '',
-        roof_work_class: r.roof_work_class, work_classifier_version: r.work_classifier_version, is_roofing: r.is_roofing, is_reroof: r.is_reroof,
-        status: r.status ?? '', status_group: r.status_group, status_observed_at: r.status_observed_at, status_source: r.status_source,
-        applied_date: r.applied_date ?? null, issued_date: r.issued_date ?? null, expires_date: r.expires_date ?? null, completed_date: r.completed_date ?? null,
-        completed_date_evidence: r.completed_date_evidence,
-        open_since: r.open_since ?? null, open_since_basis: r.open_since_basis ?? null,
-        open_duration_days: open ?? stalled, open_duration_basis: open !== null ? 'today' : stalled !== null ? r.static_duration_basis ?? null : null,
-        open_duration_as_of: asOf,
-        days_since_expiry: r.status_group === 'stalled' && r.expires_date ? days(r.expires_date) : null,
-        contractor: {
-          contractor_attribution_key: r.contractor_attribution_key, identity_status: 'source_name_attribution',
-          printed_name: r.contractor_full_name ?? '', company_name: r.contractor_company_name ?? null, trade: r.contractor_trade ?? null, phone: r.contractor_phone ?? null,
+        permit_id: r.permit_id,
+        geo_id: r.geo_id ?? null,
+        property_id: r.property_id,
+        property_link: {
+          match_method: r.link_match_method,
+          normalization_version: r.link_normalization_version ?? null,
+          confidence: r.link_confidence,
         },
-        bbb, lat: r.lat ?? null, lon: r.lon ?? null,
-        source: await this.source(r.capture_dataset, r.permit_id, r.source_url ?? DATASET_URL, r.status_observed_at, r.request_identifier, r.source_http_request),
-        record_cid: r.record_cid, property_cid: r.property_cid, data_group_cid: r.data_group_cid,
+        permit_type: r.permit_type ?? '',
+        permit_class: r.permit_class ?? '',
+        work_class: r.work_class ?? '',
+        description: r.description ?? '',
+        roof_work_class: r.roof_work_class,
+        work_classifier_version: r.work_classifier_version,
+        is_roofing: r.is_roofing,
+        is_reroof: r.is_reroof,
+        status: r.status ?? '',
+        status_group: r.status_group,
+        status_observed_at: r.status_observed_at,
+        status_source: r.status_source,
+        applied_date: r.applied_date ?? null,
+        issued_date: r.issued_date ?? null,
+        expires_date: r.expires_date ?? null,
+        completed_date: r.completed_date ?? null,
+        completed_date_evidence: r.completed_date_evidence,
+        open_since: r.open_since ?? null,
+        open_since_basis: r.open_since_basis ?? null,
+        open_duration_days: open ?? stalled,
+        open_duration_basis:
+          open !== null ? 'today' : stalled !== null ? (r.static_duration_basis ?? null) : null,
+        open_duration_as_of: asOf,
+        days_since_expiry:
+          r.status_group === 'stalled' && r.expires_date ? days(r.expires_date) : null,
+        contractor: {
+          contractor_attribution_key: r.contractor_attribution_key,
+          identity_status: 'source_name_attribution',
+          printed_name: r.contractor_full_name ?? '',
+          company_name: r.contractor_company_name ?? null,
+          trade: r.contractor_trade ?? null,
+          phone: r.contractor_phone ?? null,
+        },
+        bbb,
+        lat: r.lat ?? null,
+        lon: r.lon ?? null,
+        source: await this.source(
+          r.capture_dataset,
+          r.permit_id,
+          r.source_url ?? DATASET_URL,
+          r.status_observed_at,
+          r.request_identifier,
+          r.source_http_request,
+        ),
+        record_cid: r.record_cid,
+        property_cid: r.property_cid,
+        data_group_cid: r.data_group_cid,
         unpublished_source: {
-          dataset: r.capture_dataset, url: r.capture_url, fetched_at: r.capture_fetched_at, source_http_request: httpRequest(r.capture_source_http_request),
-          row_sha256: r.capture_row_sha256, evidence_state: r.capture_evidence_state,
-          fields: ['geo_id', 'permit_type', 'permit_class', 'work_class', 'description', 'status', 'expires_date', 'contractor_trade', 'contractor_company_name', 'contractor_full_name', 'contractor_phone', 'contractor_address1', 'contractor_address2', 'contractor_city', 'contractor_zip', 'lat', 'lon'],
+          dataset: r.capture_dataset,
+          url: r.capture_url,
+          fetched_at: r.capture_fetched_at,
+          source_http_request: httpRequest(r.capture_source_http_request),
+          row_sha256: r.capture_row_sha256,
+          evidence_state: r.capture_evidence_state,
+          fields: [
+            'geo_id',
+            'permit_type',
+            'permit_class',
+            'work_class',
+            'description',
+            'status',
+            'expires_date',
+            'contractor_trade',
+            'contractor_company_name',
+            'contractor_full_name',
+            'contractor_phone',
+            'contractor_address1',
+            'contractor_address2',
+            'contractor_city',
+            'contractor_zip',
+            'lat',
+            'lon',
+          ],
         },
       };
       if (extra) Object.assign(s, extra(r));
@@ -449,22 +755,39 @@ export class Queries {
     if (area.outside) return { items: [], total: 0, next_cursor: null, area_note: area.note };
     const center = p.lat !== undefined && p.lon !== undefined ? { lat: p.lat, lon: p.lon } : null;
     const conds = this.permitFilter(p);
-    if (p.roof_work_class) conds.push(`roof_work_class IN (${p.roof_work_class.map(lit).join(', ')})`);
-    if (p.min_open_years !== undefined) conds.push(`(${this.openDays(asOf)}) >= ${p.min_open_years * 365}`);
-    if (p.contractor_attribution_key) conds.push(`contractor_attribution_key = ${lit(p.contractor_attribution_key)}`);
+    if (p.roof_work_class)
+      conds.push(`roof_work_class IN (${p.roof_work_class.map(lit).join(', ')})`);
+    if (p.min_open_years !== undefined)
+      conds.push(`(${this.openDays(asOf)}) >= ${p.min_open_years * 365}`);
+    if (p.contractor_attribution_key)
+      conds.push(`contractor_attribution_key = ${lit(p.contractor_attribution_key)}`);
     if (p.property_id) conds.push(`property_id = ${lit(p.property_id)}`);
-    if (center) conds.push('radius_lat IS NOT NULL', bbox(center.lat, center.lon, p.radius_miles, 'radius_lat', 'radius_lon'));
+    if (center)
+      conds.push(
+        'radius_lat IS NOT NULL',
+        bbox(center.lat, center.lon, p.radius_miles, 'radius_lat', 'radius_lon'),
+      );
     const dist = center ? HAV(center.lat, center.lon, 'radius_lat', 'radius_lon') : 'NULL::DOUBLE';
     const base = `(SELECT *, ${dist} AS distance_miles FROM permits WHERE ${conds.join(' AND ')})`;
     const within = center ? `WHERE distance_miles <= ${p.radius_miles}` : '';
     const total = await this.scalar(`SELECT count(*) FROM ${base} ${within}`);
-    const rows = await this.all(`SELECT * FROM ${base} ${within} ORDER BY ${this.statusRank}, (${this.openDays(asOf)}) DESC NULLS LAST, permit_id ASC LIMIT ${p.limit} OFFSET ${offset}`);
-    const items = await this.permitSummaries(rows, asOf, center ? (r) => ({ distance_miles: Math.round(Number(r.distance_miles) * 1000) / 1000 }) : undefined);
+    const rows = await this.all(
+      `SELECT * FROM ${base} ${within} ORDER BY ${this.statusRank}, (${this.openDays(asOf)}) DESC NULLS LAST, permit_id ASC LIMIT ${p.limit} OFFSET ${offset}`,
+    );
+    const items = await this.permitSummaries(
+      rows,
+      asOf,
+      center
+        ? (r) => ({ distance_miles: Math.round(Number(r.distance_miles) * 1000) / 1000 })
+        : undefined,
+    );
     return { ...this.page(items, total, offset, p.limit, asOf), area_note: null as string | null };
   }
 
   private queryTokens(q: string): string[] {
-    return normalizeText(q).split(/(?:\.|[^a-z0-9])+/).filter((t) => t !== '' && !this.stopwords.has(t));
+    return normalizeText(q)
+      .split(/(?:\.|[^a-z0-9])+/)
+      .filter((t) => t !== '' && !this.stopwords.has(t));
   }
 
   async searchPermitText(p: TextSearchParams) {
@@ -473,18 +796,32 @@ export class Queries {
     const area = await this.areaNote(p.lat, p.lon);
     if (area.outside) return { items: [], total: 0, next_cursor: null, area_note: area.note };
     const tokens = this.queryTokens(p.q);
-    if (tokens.length === 0) return { items: [], total: 0, next_cursor: null, area_note: null as string | null };
+    if (tokens.length === 0)
+      return { items: [], total: 0, next_cursor: null, area_note: null as string | null };
     const center = p.lat !== undefined && p.lon !== undefined ? { lat: p.lat, lon: p.lon } : null;
     const conds = this.permitFilter(p);
-    if (center) conds.push('p.radius_lat IS NOT NULL', bbox(center.lat, center.lon, p.radius_miles, 'p.radius_lat', 'p.radius_lon'));
-    const dist = center ? HAV(center.lat, center.lon, 'p.radius_lat', 'p.radius_lon') : 'NULL::DOUBLE';
+    if (center)
+      conds.push(
+        'p.radius_lat IS NOT NULL',
+        bbox(center.lat, center.lon, p.radius_miles, 'p.radius_lat', 'p.radius_lon'),
+      );
+    const dist = center
+      ? HAV(center.lat, center.lon, 'p.radius_lat', 'p.radius_lon')
+      : 'NULL::DOUBLE';
     const bm = `fts_main_permit_text.match_bm25(permit_id, ${lit(tokens.join(' '))}, fields := 'description_norm,permit_class_norm,work_class_norm', conjunctive := ${p.match === 'all' ? 1 : 0})`;
     const scored = `(SELECT permit_id, ${bm} AS score FROM permit_text)`;
     const base = `(SELECT p.*, s.score AS bm25_score, ${dist} AS distance_miles FROM ${scored} s JOIN permits p ON p.permit_id = s.permit_id WHERE s.score IS NOT NULL AND ${conds.join(' AND ')})`;
     const within = center ? `WHERE distance_miles <= ${p.radius_miles}` : '';
     const total = await this.scalar(`SELECT count(*) FROM ${base} ${within}`);
-    const rows = await this.all(`SELECT * FROM ${base} ${within} ORDER BY bm25_score DESC, permit_id ASC LIMIT ${p.limit} OFFSET ${offset}`);
-    const stems = (await this.all(`SELECT ${tokens.map((t) => `stem(${lit(t)}, 'porter') AS "${t.replace(/"/g, '')}"`).join(', ')}`))[0] ?? {};
+    const rows = await this.all(
+      `SELECT * FROM ${base} ${within} ORDER BY bm25_score DESC, permit_id ASC LIMIT ${p.limit} OFFSET ${offset}`,
+    );
+    const stems =
+      (
+        await this.all(
+          `SELECT ${tokens.map((t) => `stem(${lit(t)}, 'porter') AS "${t.replace(/"/g, '')}"`).join(', ')}`,
+        )
+      )[0] ?? {};
     const stemList = Object.values(stems).map(String);
     const items = await this.permitSummaries(rows, asOf, (r) => ({
       ...(center ? { distance_miles: Math.round(Number(r.distance_miles) * 1000) / 1000 } : {}),
@@ -500,34 +837,80 @@ export class Queries {
     const asOf = this.today();
     const [s] = await this.permitSummaries(rows, asOf);
     const pr = await this.propertyRow(`p.property_id = ${lit(rows[0]!.property_id)}`);
-    return { ...(s as any), property: pr ? await this.propertySummary(pr) : null, applicant: null, applicant_unavailable_reason: 'not collected: personal contact fields' } as PermitDetail;
+    return {
+      ...(s as any),
+      property: pr ? await this.propertySummary(pr) : null,
+      applicant: null,
+      applicant_unavailable_reason: 'not collected: personal contact fields',
+    } as PermitDetail;
   }
 
   // ---- contractors -------------------------------------------------------------------------------------------------------------------
   async getContractor(key: string): Promise<Contractor> {
-    const rows = await this.all(`SELECT * FROM contractors WHERE contractor_attribution_key = ${lit(key)}`);
+    const rows = await this.all(
+      `SELECT * FROM contractors WHERE contractor_attribution_key = ${lit(key)}`,
+    );
     if (rows.length === 0) throw notFound(`contractor ${key}`);
     const c = rows[0]!;
-    const reg = await this.all(`SELECT rc.*, b.us_url, b.us_fetched_at, b.us_source_http_request, b.row_sha256, b.evidence_state, b.us_fields
+    const reg = await this
+      .all(`SELECT rc.*, b.us_url, b.us_fetched_at, b.us_source_http_request, b.row_sha256, b.evidence_state, b.us_fields
       FROM registry_candidates rc JOIN business_records b USING (business_record_id) WHERE rc.contractor_attribution_key = ${lit(key)} ORDER BY rc.source, rc.business_record_id`);
-    const lic = await this.all(`SELECT lc.*, l.us_url, l.us_fetched_at, l.us_source_http_request, l.row_sha256, l.evidence_state, l.us_fields
+    const lic = await this
+      .all(`SELECT lc.*, l.us_url, l.us_fetched_at, l.us_source_http_request, l.row_sha256, l.evidence_state, l.us_fields
       FROM license_candidates lc JOIN license_records l USING (license_record_id) WHERE lc.contractor_attribution_key = ${lit(key)} ORDER BY lc.source, lc.license_record_id`);
     const haveLicenses = (await this.scalar('SELECT count(*) FROM license_records')) > 0;
-    const us = (r: Row) => ({ dataset: r.dataset, url: r.us_url, fetched_at: r.us_fetched_at, source_http_request: httpRequest(r.us_source_http_request), row_sha256: r.row_sha256, evidence_state: r.evidence_state, fields: r.us_fields });
+    const us = (r: Row) => ({
+      dataset: r.dataset,
+      url: r.us_url,
+      fetched_at: r.us_fetched_at,
+      source_http_request: httpRequest(r.us_source_http_request),
+      row_sha256: r.row_sha256,
+      evidence_state: r.evidence_state,
+      fields: r.us_fields,
+    });
     return {
-      contractor_attribution_key: c.contractor_attribution_key, identity_status: 'source_name_attribution', company_name: c.company_name ?? null,
-      printed_names: c.printed_names ?? [], trade: c.trade ?? null, phone: c.phone ?? null, address: c.address ?? null,
-      permit_count: c.permit_count, open_permit_count: c.open_permit_count, roofing_permit_count: c.roofing_permit_count, needs_review_permit_count: c.needs_review_permit_count,
+      contractor_attribution_key: c.contractor_attribution_key,
+      identity_status: 'source_name_attribution',
+      company_name: c.company_name ?? null,
+      printed_names: c.printed_names ?? [],
+      trade: c.trade ?? null,
+      phone: c.phone ?? null,
+      address: c.address ?? null,
+      permit_count: c.permit_count,
+      open_permit_count: c.open_permit_count,
+      roofing_permit_count: c.roofing_permit_count,
+      needs_review_permit_count: c.needs_review_permit_count,
       registry_candidates: reg.map((r) => ({
-        source: r.source, dataset: r.dataset, business_record_id: r.business_record_id, taxpayer_number: r.taxpayer_number ?? null, sos_file_number: r.sos_file_number ?? null,
-        name: r.name, scope: r.scope, matched_field: r.matched_field, printed_value: r.printed_value, normalized_name: r.normalized_name,
-        match_method: r.match_method, matcher_version: r.matcher_version, status: 'candidate', unpublished_source: us(r),
+        source: r.source,
+        dataset: r.dataset,
+        business_record_id: r.business_record_id,
+        taxpayer_number: r.taxpayer_number ?? null,
+        sos_file_number: r.sos_file_number ?? null,
+        name: r.name,
+        scope: r.scope,
+        matched_field: r.matched_field,
+        printed_value: r.printed_value,
+        normalized_name: r.normalized_name,
+        match_method: r.match_method,
+        matcher_version: r.matcher_version,
+        status: 'candidate',
+        unpublished_source: us(r),
       })),
       license_candidates: haveLicenses
         ? lic.map((r) => ({
-            source: r.source, dataset: r.dataset, license_record_id: r.license_record_id, license_number: r.license_number ?? null, license_type: r.license_type ?? null,
-            name: r.name, matched_field: r.matched_field, printed_value: r.printed_value, normalized_name: r.normalized_name,
-            match_method: r.match_method, matcher_version: r.matcher_version, status: 'candidate', unpublished_source: us(r),
+            source: r.source,
+            dataset: r.dataset,
+            license_record_id: r.license_record_id,
+            license_number: r.license_number ?? null,
+            license_type: r.license_type ?? null,
+            name: r.name,
+            matched_field: r.matched_field,
+            printed_value: r.printed_value,
+            normalized_name: r.normalized_name,
+            match_method: r.match_method,
+            matcher_version: r.matcher_version,
+            status: 'candidate',
+            unpublished_source: us(r),
           }))
         : null,
       official_identity: null,
@@ -537,19 +920,56 @@ export class Queries {
 
   // ---- businesses and licenses ---------------------------------------------------------------------------------------------------------
   private matcherVersion = () =>
-    this.memo('matcher', async () => String((await this.all('SELECT matcher_version FROM source_loads ORDER BY source_key LIMIT 1'))[0]?.matcher_version ?? ''));
+    this.memo('matcher', async () =>
+      String(
+        (await this.all('SELECT matcher_version FROM source_loads ORDER BY source_key LIMIT 1'))[0]
+          ?.matcher_version ?? '',
+      ),
+    );
 
   private businessFromRow(r: Row): BusinessRecord {
     const a = [r.address_line1, r.address_line2, r.address_city, r.address_state, r.address_zip];
     return {
-      business_record_id: r.business_record_id, source: r.source, dataset: r.dataset, record_id: r.record_id ?? null, record_id_withheld: r.record_id_withheld ?? null,
-      name: r.name, sos_file_number: r.sos_file_number ?? null, organization_type: r.organization_type ?? null, status_code: r.status_code ?? null,
-      status_date: r.status_date ?? null, right_to_transact: r.right_to_transact ?? null, naics_code: r.naics_code ?? null,
-      address: a.every((x) => x === null || x === undefined) ? null : { line1: r.address_line1 ?? null, line2: r.address_line2 ?? null, city: r.address_city ?? null, state: r.address_state ?? null, zip: r.address_zip ?? null },
-      address_kind: r.address_kind ?? null, county_code: r.county_code ?? null, scope: r.scope,
-      candidate_of: { contractor_attributions: r.candidate_of_contractors, roll_owners: r.candidate_of_owners },
-      detail_url: r.detail_url ?? null, printed: jparse(r.printed), record_cid: null,
-      unpublished_source: { dataset: r.dataset, url: r.us_url, fetched_at: r.us_fetched_at, source_http_request: httpRequest(r.us_source_http_request), row_sha256: r.row_sha256, evidence_state: r.evidence_state, fields: r.us_fields },
+      business_record_id: r.business_record_id,
+      source: r.source,
+      dataset: r.dataset,
+      record_id: r.record_id ?? null,
+      record_id_withheld: r.record_id_withheld ?? null,
+      name: r.name,
+      sos_file_number: r.sos_file_number ?? null,
+      organization_type: r.organization_type ?? null,
+      status_code: r.status_code ?? null,
+      status_date: r.status_date ?? null,
+      right_to_transact: r.right_to_transact ?? null,
+      naics_code: r.naics_code ?? null,
+      address: a.every((x) => x === null || x === undefined)
+        ? null
+        : {
+            line1: r.address_line1 ?? null,
+            line2: r.address_line2 ?? null,
+            city: r.address_city ?? null,
+            state: r.address_state ?? null,
+            zip: r.address_zip ?? null,
+          },
+      address_kind: r.address_kind ?? null,
+      county_code: r.county_code ?? null,
+      scope: r.scope,
+      candidate_of: {
+        contractor_attributions: r.candidate_of_contractors,
+        roll_owners: r.candidate_of_owners,
+      },
+      detail_url: r.detail_url ?? null,
+      printed: jparse(r.printed),
+      record_cid: null,
+      unpublished_source: {
+        dataset: r.dataset,
+        url: r.us_url,
+        fetched_at: r.us_fetched_at,
+        source_http_request: httpRequest(r.us_source_http_request),
+        row_sha256: r.row_sha256,
+        evidence_state: r.evidence_state,
+        fields: r.us_fields,
+      },
     } as BusinessRecord;
   }
 
@@ -559,8 +979,16 @@ export class Queries {
     const conds: string[] = [];
     if (p.q !== undefined) {
       const n = normalizeMatcherName(p.q);
-      if (n === null) return { items: [], total: 0, next_cursor: null, matcher_version: await this.matcherVersion() };
-      conds.push(p.match === 'prefix' ? `starts_with(name_norm, ${lit(n)})` : `name_norm = ${lit(n)}`);
+      if (n === null)
+        return {
+          items: [],
+          total: 0,
+          next_cursor: null,
+          matcher_version: await this.matcherVersion(),
+        };
+      conds.push(
+        p.match === 'prefix' ? `starts_with(name_norm, ${lit(n)})` : `name_norm = ${lit(n)}`,
+      );
     } else {
       const v = lit((p.number ?? '').trim());
       conds.push(`(taxpayer_number = ${v} OR sos_file_number = ${v} OR record_id = ${v})`);
@@ -569,22 +997,53 @@ export class Queries {
     if (p.scope !== 'all') conds.push(`scope = ${lit(p.scope)}`);
     const where = conds.join(' AND ');
     const total = await this.scalar(`SELECT count(*) FROM business_records WHERE ${where}`);
-    const rows = await this.all(`SELECT * FROM business_records WHERE ${where} ORDER BY name_norm, source, business_record_id LIMIT ${p.limit} OFFSET ${offset}`);
-    return { ...this.page(rows.map((r) => this.businessFromRow(r)), total, offset, p.limit, asOf), matcher_version: await this.matcherVersion() };
+    const rows = await this.all(
+      `SELECT * FROM business_records WHERE ${where} ORDER BY name_norm, source, business_record_id LIMIT ${p.limit} OFFSET ${offset}`,
+    );
+    return {
+      ...this.page(
+        rows.map((r) => this.businessFromRow(r)),
+        total,
+        offset,
+        p.limit,
+        asOf,
+      ),
+      matcher_version: await this.matcherVersion(),
+    };
   }
   async getBusiness(id: string): Promise<BusinessRecord> {
-    const rows = await this.all(`SELECT * FROM business_records WHERE business_record_id = ${lit(id)}`);
+    const rows = await this.all(
+      `SELECT * FROM business_records WHERE business_record_id = ${lit(id)}`,
+    );
     if (rows.length === 0) throw notFound(`business record ${id}`);
     return this.businessFromRow(rows[0]!);
   }
 
   private licenseFromRow(r: Row): LicenseRecord {
     return {
-      license_record_id: r.license_record_id, source: r.source, dataset: r.dataset, license_number: r.license_number ?? null, license_type: r.license_type ?? null,
-      license_subtype: r.license_subtype ?? null, holder_name: r.holder_name ?? null, business_name: r.business_name ?? null,
-      issue_date: r.issue_date ?? null, expiration_date: r.expiration_date ?? null, business_city: r.business_city ?? null, business_county: r.business_county ?? null,
-      printed: jparse(r.printed), record_cid: null,
-      unpublished_source: { dataset: r.dataset, url: r.us_url, fetched_at: r.us_fetched_at, source_http_request: httpRequest(r.us_source_http_request), row_sha256: r.row_sha256, evidence_state: r.evidence_state, fields: r.us_fields },
+      license_record_id: r.license_record_id,
+      source: r.source,
+      dataset: r.dataset,
+      license_number: r.license_number ?? null,
+      license_type: r.license_type ?? null,
+      license_subtype: r.license_subtype ?? null,
+      holder_name: r.holder_name ?? null,
+      business_name: r.business_name ?? null,
+      issue_date: r.issue_date ?? null,
+      expiration_date: r.expiration_date ?? null,
+      business_city: r.business_city ?? null,
+      business_county: r.business_county ?? null,
+      printed: jparse(r.printed),
+      record_cid: null,
+      unpublished_source: {
+        dataset: r.dataset,
+        url: r.us_url,
+        fetched_at: r.us_fetched_at,
+        source_http_request: httpRequest(r.us_source_http_request),
+        row_sha256: r.row_sha256,
+        evidence_state: r.evidence_state,
+        fields: r.us_fields,
+      },
     } as LicenseRecord;
   }
   async searchLicenses(p: LicenseSearchParams) {
@@ -593,25 +1052,51 @@ export class Queries {
     const conds: string[] = [];
     if (p.q !== undefined) {
       const n = normalizeMatcherName(p.q);
-      if (n === null) return { items: [], total: 0, next_cursor: null, matcher_version: await this.matcherVersion() };
-      conds.push(p.match === 'prefix' ? `(starts_with(name_norm, ${lit(n)}) OR starts_with(business_name_norm, ${lit(n)}))` : `(name_norm = ${lit(n)} OR business_name_norm = ${lit(n)})`);
+      if (n === null)
+        return {
+          items: [],
+          total: 0,
+          next_cursor: null,
+          matcher_version: await this.matcherVersion(),
+        };
+      conds.push(
+        p.match === 'prefix'
+          ? `(starts_with(name_norm, ${lit(n)}) OR starts_with(business_name_norm, ${lit(n)}))`
+          : `(name_norm = ${lit(n)} OR business_name_norm = ${lit(n)})`,
+      );
     } else conds.push(`license_number = ${lit((p.license_number ?? '').trim())}`);
     if (p.source) conds.push(`source IN (${p.source.map(lit).join(', ')})`);
     if (p.license_type) conds.push(`license_type IN (${p.license_type.map(lit).join(', ')})`);
     const where = conds.join(' AND ');
     const total = await this.scalar(`SELECT count(*) FROM license_records WHERE ${where}`);
-    const rows = await this.all(`SELECT * FROM license_records WHERE ${where} ORDER BY name_norm, source, license_record_id LIMIT ${p.limit} OFFSET ${offset}`);
-    return { ...this.page(rows.map((r) => this.licenseFromRow(r)), total, offset, p.limit, asOf), matcher_version: await this.matcherVersion() };
+    const rows = await this.all(
+      `SELECT * FROM license_records WHERE ${where} ORDER BY name_norm, source, license_record_id LIMIT ${p.limit} OFFSET ${offset}`,
+    );
+    return {
+      ...this.page(
+        rows.map((r) => this.licenseFromRow(r)),
+        total,
+        offset,
+        p.limit,
+        asOf,
+      ),
+      matcher_version: await this.matcherVersion(),
+    };
   }
   async getLicense(id: string): Promise<LicenseRecord> {
-    const rows = await this.all(`SELECT * FROM license_records WHERE license_record_id = ${lit(id)}`);
+    const rows = await this.all(
+      `SELECT * FROM license_records WHERE license_record_id = ${lit(id)}`,
+    );
     if (rows.length === 0) throw notFound(`license record ${id}`);
     return this.licenseFromRow(rows[0]!);
   }
 }
 
 /** As-printed substring (at most ~240 characters) of the first field that contains a query stem. */
-function snippet(r: Row, stems: string[]): { field: 'description' | 'permit_class' | 'work_class'; text: string } {
+function snippet(
+  r: Row,
+  stems: string[],
+): { field: 'description' | 'permit_class' | 'work_class'; text: string } {
   const alias = TEXT_ALIASES[0]!;
   for (const field of ['description', 'permit_class', 'work_class'] as const) {
     const raw: string | null = r[field] ?? null;
@@ -628,7 +1113,8 @@ function snippet(r: Row, stems: string[]): { field: 'description' | 'permit_clas
     const end = Math.min(raw.length, start + 240);
     return { field, text: raw.slice(start, end) };
   }
-  for (const field of ['description', 'permit_class', 'work_class'] as const) if (r[field]) return { field, text: String(r[field]).slice(0, 240) };
+  for (const field of ['description', 'permit_class', 'work_class'] as const)
+    if (r[field]) return { field, text: String(r[field]).slice(0, 240) };
   return { field: 'description', text: '' };
 }
 
@@ -636,16 +1122,30 @@ function snippet(r: Row, stems: string[]): { field: 'description' | 'permit_clas
 export function normalizeRun(rec: any, manifestCid: string | null, groupRows: Row[]): Row {
   const r: Row = { ...rec };
   if (rec.window) {
-    r.window = Object.fromEntries(Object.entries<any>(rec.window).map(([k, v]) => [k, { from: null, to: null, ...v }]));
+    r.window = Object.fromEntries(
+      Object.entries<any>(rec.window).map(([k, v]) => [k, { from: null, to: null, ...v }]),
+    );
   }
   if (Array.isArray(rec.limitations)) {
     r.limitations = rec.limitations.map((l: any) =>
-      typeof l.records_request === 'string' ? { ...l, detail: `${l.detail} (records request: ${l.records_request})`, records_request: null } : l,
+      typeof l.records_request === 'string'
+        ? {
+            ...l,
+            detail: `${l.detail} (records request: ${l.records_request})`,
+            records_request: null,
+          }
+        : l,
     );
   }
   if ((!rec.groups || Object.keys(rec.groups).length === 0) && groupRows.length) {
-    r.groups = Object.fromEntries(groupRows.map((g) => [`${g.group_name}/${g.shard}`, { cid: g.archive_cid, schema: g.schema_cid, tables: g.tables_cid }]));
+    r.groups = Object.fromEntries(
+      groupRows.map((g) => [
+        `${g.group_name}/${g.shard}`,
+        { cid: g.archive_cid, schema: g.schema_cid, tables: g.tables_cid },
+      ]),
+    );
   }
-  if ((r.manifest_cid === null || r.manifest_cid === undefined) && manifestCid) r.manifest_cid = manifestCid;
+  if ((r.manifest_cid === null || r.manifest_cid === undefined) && manifestCid)
+    r.manifest_cid = manifestCid;
   return r;
 }

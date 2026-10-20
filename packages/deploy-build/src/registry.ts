@@ -15,22 +15,34 @@ const REG = (n: string) => path.join(KIT_DATA, 'registry', n);
 const LIC = (n: string) => path.join(KIT_DATA, 'licensing', n);
 const MATCH = (n: string) => path.join(KIT_DATA, 'matcher', `${n}.names.parquet`);
 const US = 'chr(31)';
-const recId = (source: string, ...parts: string[]) => `substr(sha256(${[q(source), ...parts].join(` || ${US} || `)}), 1, 32)`;
+const recId = (source: string, ...parts: string[]) =>
+  `substr(sha256(${[q(source), ...parts].join(` || ${US} || `)}), 1, 32)`;
 
 async function describeCols(db: Db, file: string): Promise<string[]> {
-  const rows = await db.rows<{ column_name: string }>(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(${q(file)}))`);
+  const rows = await db.rows<{ column_name: string }>(
+    `SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(${q(file)}))`,
+  );
   return rows.map((r) => r.column_name);
 }
 
 /** JSON object of the source columns as printed (trimmed values), the un-suffixed names, minus `exclude`. */
 function printedExpr(cols: string[], exclude: string[] = []): string {
-  const base = cols.filter((c) => c.endsWith('__trimmed')).map((c) => c.slice(0, -'__trimmed'.length)).filter((c) => !exclude.includes(c));
+  const base = cols
+    .filter((c) => c.endsWith('__trimmed'))
+    .map((c) => c.slice(0, -'__trimmed'.length))
+    .filter((c) => !exclude.includes(c));
   return `json_object(${base.map((c) => `${q(c)}, ${c}__trimmed`).join(', ')})::VARCHAR`;
 }
 
-const reqJson = (urlCol: string) => `json_object('method', 'GET', 'url', ${urlCol}, 'multiValueQueryString', json_object())::VARCHAR`;
+const reqJson = (urlCol: string) =>
+  `json_object('method', 'GET', 'url', ${urlCol}, 'multiValueQueryString', json_object())::VARCHAR`;
 
-export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: string) => string): Promise<RegistryResult> {
+export async function loadRegistry(
+  db: Db,
+  kit: Kit,
+  o: BuildOptions,
+  tmp: (n: string) => string,
+): Promise<RegistryResult> {
   const MATCHER_VERSION: string = kit.matcher.MATCHER_VERSION;
   const MATCH_METHOD: string = kit.matcher.MATCH_METHOD;
   const normalizeName: (s: unknown) => string | null = kit.matcher.normalizeName;
@@ -56,7 +68,9 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
     LEFT JOIN c_company co ON co.k = p.k LEFT JOIN c_trade tr ON tr.k = p.k LEFT JOIN c_phone ph ON ph.k = p.k LEFT JOIN c_address ad ON ad.k = p.k
     LEFT JOIN (SELECT contractor_attribution_key AS k, list(DISTINCT contractor_full_name ORDER BY contractor_full_name) AS names
                FROM permits WHERE contractor_full_name IS NOT NULL GROUP BY 1) nm ON nm.k = p.k`);
-  await db.run(`UPDATE contractors SET bbb_note = ${q('BBB returns a bot challenge and 403 to scripted access; ratings ship as null, status blocked, until approved API access (decisions.md section 4)')}`);
+  await db.run(
+    `UPDATE contractors SET bbb_note = ${q('BBB returns a bot challenge and 403 to scripted access; ratings ship as null, status blocked, until approved API access (decisions.md section 4)')}`,
+  );
 
   // ---- contractor names normalized by the kit matcher ---------------------------------------------------------------------
   const names = await db.rows<{ k: string; field: string; printed: string }>(
@@ -66,23 +80,41 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
   const cn = names
     .map((n) => ({ ...n, norm: normalizeName(n.printed) }))
     .filter((n) => n.norm !== null);
-  await db.run('CREATE TEMP TABLE contractor_names (k VARCHAR, field VARCHAR, printed VARCHAR, norm VARCHAR)');
-  await db.insertJson('contractor_names', cn.map((n) => ({ k: n.k, field: n.field, printed: n.printed, norm: n.norm })), tmp('cn.ndjson'));
+  await db.run(
+    'CREATE TEMP TABLE contractor_names (k VARCHAR, field VARCHAR, printed VARCHAR, norm VARCHAR)',
+  );
+  await db.insertJson(
+    'contractor_names',
+    cn.map((n) => ({ k: n.k, field: n.field, printed: n.printed, norm: n.norm })),
+    tmp('cn.ndjson'),
+  );
 
   const candSql = (source: string, names: string) =>
     `SELECT cn.k, cn.field, cn.printed, cn.norm, nm.entity_key, ${q(source)} AS source
      FROM contractor_names cn JOIN read_parquet(${q(MATCH(names))}) nm ON nm.normalized_name = cn.norm WHERE nm.keys_under_name = 1`;
-  await db.run(`CREATE TEMP TABLE cand_keys (k VARCHAR, field VARCHAR, printed VARCHAR, norm VARCHAR, entity_key VARCHAR, source VARCHAR)`);
+  await db.run(
+    `CREATE TEMP TABLE cand_keys (k VARCHAR, field VARCHAR, printed VARCHAR, norm VARCHAR, entity_key VARCHAR, source VARCHAR)`,
+  );
   // registry sources match the printed company name only; license sources match the company and the printed full name
   for (const [source, names, fields] of [
     ['tx-comptroller-franchise-tax', 'tx-comptroller-franchise-tax-statewide', ['company_name']],
     ['tx-comptroller-sales-tax', 'tx-comptroller-sales-tax-travis', ['company_name']],
     ['tx-sos-veteran-owned-business', 'tx-sos-veteran-owned-business', ['company_name']],
     ['tdlr-license-files', 'tdlr-license-files', ['company_name', 'printed_name']],
-    ['tsbpe-responsible-master-plumber', 'tsbpe-responsible-master-plumber', ['company_name', 'printed_name']],
-    ['austin-row-contractor-licenses', 'austin-row-contractor-licenses', ['company_name', 'printed_name']],
+    [
+      'tsbpe-responsible-master-plumber',
+      'tsbpe-responsible-master-plumber',
+      ['company_name', 'printed_name'],
+    ],
+    [
+      'austin-row-contractor-licenses',
+      'austin-row-contractor-licenses',
+      ['company_name', 'printed_name'],
+    ],
   ] as const) {
-    await db.run(`INSERT INTO cand_keys SELECT * FROM (${candSql(source, names)}) WHERE field IN (${fields.map(q).join(', ')})`);
+    await db.run(
+      `INSERT INTO cand_keys SELECT * FROM (${candSql(source, names)}) WHERE field IN (${fields.map(q).join(', ')})`,
+    );
   }
 
   // ---- business records ---------------------------------------------------------------------------------------------------
@@ -138,7 +170,9 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
     FROM read_parquet(${q(voFile)}) v LEFT JOIN read_parquet(${q(joinFile)}) j ON j.veteran_row_sha256 = v._row_sha256
     WHERE j.match = 'travis' OR v.filing_number__trimmed IN (SELECT entity_key FROM cand_keys WHERE source = ${q(VO)})`);
   const bizTotal = await db.scalar('SELECT count(*) FROM biz_raw');
-  await db.run(`CREATE TEMP TABLE biz_dedup AS SELECT * FROM biz_raw QUALIFY row_number() OVER (PARTITION BY business_record_id ORDER BY row_sha256) = 1`);
+  await db.run(
+    `CREATE TEMP TABLE biz_dedup AS SELECT * FROM biz_raw QUALIFY row_number() OVER (PARTITION BY business_record_id ORDER BY row_sha256) = 1`,
+  );
   const bizDistinct = await db.scalar('SELECT count(*) FROM biz_dedup');
 
   // ---- license records ---------------------------------------------------------------------------------------------------
@@ -151,7 +185,8 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
   const TD = 'tdlr-license-files';
   const TS = 'tsbpe-responsible-master-plumber';
   const AR = 'austin-row-contractor-licenses';
-  const date = (c: string) => `coalesce(try_strptime(${c}, '%m/%d/%Y')::DATE, try_cast(left(${c}, 10) AS DATE))`;
+  const date = (c: string) =>
+    `coalesce(try_strptime(${c}, '%m/%d/%Y')::DATE, try_cast(left(${c}, 10) AS DATE))`;
   const tdKey = `license_type__trimmed || ${US} || coalesce(license_subtype__trimmed, '') || ${US} || license_number__trimmed`;
   await db.run(`CREATE TEMP TABLE lic_raw AS
     SELECT ${recId(TD, 'license_type__trimmed', "coalesce(license_subtype__trimmed, '')", 'license_number__trimmed')} AS license_record_id, ${q(TD)} AS source,
@@ -193,7 +228,10 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
     if (a !== normalizeMatcherName(r.s)) disagree++;
     return { raw: r.s, norm: a ?? '' };
   });
-  if (disagree) throw new Error(`the query layer's matcher normalizer disagrees with the kit's on ${disagree} loaded names`);
+  if (disagree)
+    throw new Error(
+      `the query layer's matcher normalizer disagrees with the kit's on ${disagree} loaded names`,
+    );
   await db.run('CREATE TEMP TABLE norm_map (raw VARCHAR, norm VARCHAR)');
   await db.insertJson('norm_map', mapRows, tmp('norm_map.ndjson'));
 
@@ -222,8 +260,13 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
       SELECT business_record_id, count(DISTINCT contractor_attribution_key)::INTEGER n FROM registry_candidates GROUP BY 1) x
     WHERE business_records.business_record_id = x.business_record_id`);
   // out-of-county rows are loaded only as candidates: drop any that did not match (veteran/franchise candidates are all matched by construction)
-  const orphans = await db.scalar(`SELECT count(*) FROM business_records WHERE scope = 'out_of_county' AND candidate_of_contractors = 0 AND candidate_of_owners = 0`);
-  if (orphans) throw new Error(`${orphans} out-of-county business records are not a candidate of any contractor`);
+  const orphans = await db.scalar(
+    `SELECT count(*) FROM business_records WHERE scope = 'out_of_county' AND candidate_of_contractors = 0 AND candidate_of_owners = 0`,
+  );
+  if (orphans)
+    throw new Error(
+      `${orphans} out-of-county business records are not a candidate of any contractor`,
+    );
 
   // ---- source_loads and reads ----------------------------------------------------------------------------------------------
   const srcInfo = [
@@ -235,26 +278,67 @@ export async function loadRegistry(db: Db, kit: Kit, o: BuildOptions, tmp: (n: s
     { key: AR, kind: 'license', dataset: 'austin-row-contractor-licenses/8d92-wsiw', read: arow },
   ];
   const reads: object[] = [];
-  const runSources = JSON.parse((await import('node:fs')).readFileSync((await import('./env.js')).RUN_RECORD_PATH, 'utf8')).sources as any[];
+  const runSources = JSON.parse(
+    (await import('node:fs')).readFileSync((await import('./env.js')).RUN_RECORD_PATH, 'utf8'),
+  ).sources as any[];
   const shaOf = (name: string) => runSources.find((s) => s.dataset === name)?.sha256 as string;
-  const sourceRunName: Record<string, string> = { [FR]: 'tx-comptroller-franchise-tax-statewide', [ST]: 'tx-comptroller-sales-tax-travis', [VO]: VO, [TD]: TD, [TS]: TS, [AR]: AR };
+  const sourceRunName: Record<string, string> = {
+    [FR]: 'tx-comptroller-franchise-tax-statewide',
+    [ST]: 'tx-comptroller-sales-tax-travis',
+    [VO]: VO,
+    [TD]: TD,
+    [TS]: TS,
+    [AR]: AR,
+  };
   for (const s of srcInfo) {
     const t = s.kind === 'business' ? 'business_records' : 'license_records';
     const rowsRead = await db.scalar(`SELECT count(*) FROM read_parquet(${q(s.read)})`);
     const loaded = await db.scalar(`SELECT count(*) FROM ${t} WHERE source = ${q(s.key)}`);
-    const scopeCol = s.kind === 'business' ? `scope = 'travis'` : s.key === TD ? `upper(coalesce(business_county, '')) = 'TRAVIS'` : 'TRUE';
-    const inScope = await db.scalar(`SELECT count(*) FROM ${t} WHERE source = ${q(s.key)} AND ${scopeCol}`);
-    const withheld = s.kind === 'business' ? await db.scalar(`SELECT count(*) FROM business_records WHERE source = ${q(s.key)} AND record_id_withheld IS NOT NULL`) : 0;
-    const candidates = await db.scalar(`SELECT count(DISTINCT k) FROM cand_keys WHERE source = ${q(s.key)} AND entity_key IN (SELECT entity_key FROM ${s.kind === 'business' ? 'biz_dedup' : 'lic_dedup'} WHERE source = ${q(s.key)})`);
-    const fetched = await db.one<{ f: string }>(`SELECT max(us_fetched_at) AS f FROM ${t} WHERE source = ${q(s.key)}`);
-    const dupRows = s.kind === 'business'
-      ? await db.scalar(`SELECT count(*) FROM biz_raw WHERE source = ${q(s.key)} AND business_record_id IN (SELECT business_record_id FROM biz_raw GROUP BY 1 HAVING count(*) > 1)`)
-      : await db.scalar(`SELECT count(*) FROM lic_raw WHERE source = ${q(s.key)} AND license_record_id IN (SELECT license_record_id FROM lic_raw GROUP BY 1 HAVING count(*) > 1)`);
-    await db.run(`INSERT INTO source_loads VALUES (${[q(s.key), q(s.kind), q(s.dataset), loaded, inScope, loaded - inScope, withheld, candidates, q(fetched.f), q(MATCHER_VERSION)].join(', ')})`);
+    const scopeCol =
+      s.kind === 'business'
+        ? `scope = 'travis'`
+        : s.key === TD
+          ? `upper(coalesce(business_county, '')) = 'TRAVIS'`
+          : 'TRUE';
+    const inScope = await db.scalar(
+      `SELECT count(*) FROM ${t} WHERE source = ${q(s.key)} AND ${scopeCol}`,
+    );
+    const withheld =
+      s.kind === 'business'
+        ? await db.scalar(
+            `SELECT count(*) FROM business_records WHERE source = ${q(s.key)} AND record_id_withheld IS NOT NULL`,
+          )
+        : 0;
+    const candidates = await db.scalar(
+      `SELECT count(DISTINCT k) FROM cand_keys WHERE source = ${q(s.key)} AND entity_key IN (SELECT entity_key FROM ${s.kind === 'business' ? 'biz_dedup' : 'lic_dedup'} WHERE source = ${q(s.key)})`,
+    );
+    const fetched = await db.one<{ f: string }>(
+      `SELECT max(us_fetched_at) AS f FROM ${t} WHERE source = ${q(s.key)}`,
+    );
+    const dupRows =
+      s.kind === 'business'
+        ? await db.scalar(
+            `SELECT count(*) FROM biz_raw WHERE source = ${q(s.key)} AND business_record_id IN (SELECT business_record_id FROM biz_raw GROUP BY 1 HAVING count(*) > 1)`,
+          )
+        : await db.scalar(
+            `SELECT count(*) FROM lic_raw WHERE source = ${q(s.key)} AND license_record_id IN (SELECT license_record_id FROM lic_raw GROUP BY 1 HAVING count(*) > 1)`,
+          );
+    await db.run(
+      `INSERT INTO source_loads VALUES (${[q(s.key), q(s.kind), q(s.dataset), loaded, inScope, loaded - inScope, withheld, candidates, q(fetched.f), q(MATCHER_VERSION)].join(', ')})`,
+    );
     const sha = shaOf(sourceRunName[s.key]!);
     // identical duplicate rows (TDLR repeats rows across its daily files) are not conflicts; differing ones are
     const conflicting = s.key === TD ? 0 : dupRows;
-    reads.push({ dataset: s.dataset, url: `kit capture of ${s.dataset}`, fetched_at: fetched.f, sha256: sha, rows: rowsRead, matched: loaded, unavailable: 0, conflicting });
+    reads.push({
+      dataset: s.dataset,
+      url: `kit capture of ${s.dataset}`,
+      fetched_at: fetched.f,
+      sha256: sha,
+      rows: rowsRead,
+      matched: loaded,
+      unavailable: 0,
+      conflicting,
+    });
   }
   o.log(`  business rows ${bizTotal} -> ${bizDistinct}; license rows ${licTotal}`);
   return { reads };

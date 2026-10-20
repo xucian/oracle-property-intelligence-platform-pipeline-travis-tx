@@ -113,7 +113,14 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
   o.log(`  seed rows ${seed.rows}`);
   const permitsFile = tmp('permits.ndjson');
   const roofFile = tmp('roofage.ndjson');
-  const staged = await stagePermitsAndRoofAge({ kit, shards: o.shards, parcelsByShard, permitsFile, roofAgeFile: roofFile, log: o.log });
+  const staged = await stagePermitsAndRoofAge({
+    kit,
+    shards: o.shards,
+    parcelsByShard,
+    permitsFile,
+    roofAgeFile: roofFile,
+    log: o.log,
+  });
   lap('stage', t);
 
   t = performance.now();
@@ -175,11 +182,15 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
   const joined = await db.scalar('SELECT count(*) FROM permits_joined');
   const published = await db.scalar('SELECT count(*) FROM lex.pi_property_improvement');
   if (joined !== staged.permitRows || joined !== published)
-    throw new Error(`permit join: staged ${staged.permitRows}, joined ${joined}, published ${published} (all three must agree)`);
+    throw new Error(
+      `permit join: staged ${staged.permitRows}, joined ${joined}, published ${published} (all three must agree)`,
+    );
   lap('permits-join', t);
 
   t = performance.now();
-  await db.run(`CREATE TEMP MACRO norm_addr(x) AS lower(regexp_replace(strip_accents(coalesce(x, '')), '[^A-Za-z0-9]', '', 'g'))`);
+  await db.run(
+    `CREATE TEMP MACRO norm_addr(x) AS lower(regexp_replace(strip_accents(coalesce(x, '')), '[^A-Za-z0-9]', '', 'g'))`,
+  );
   await db.run(`CREATE TEMP TABLE parcel_geo AS
     SELECT p.parcel_identifier AS property_id, g.latitude AS lat, g.longitude AS lon
     FROM lex.county_parcel p
@@ -205,7 +216,9 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
     SELECT property_id, lat, lon FROM (
       SELECT *, row_number() OVER (PARTITION BY property_id ORDER BY open_since DESC NULLS LAST, permit_id ASC) rn
       FROM permits_joined WHERE lat IS NOT NULL AND lon IS NOT NULL) WHERE rn = 1`);
-  await db.run(`CREATE TEMP TABLE situs_zips AS SELECT DISTINCT substr(situs_zip, 1, 5) AS zip FROM seed_stage WHERE situs_zip IS NOT NULL`);
+  await db.run(
+    `CREATE TEMP TABLE situs_zips AS SELECT DISTINCT substr(situs_zip, 1, 5) AS zip FROM seed_stage WHERE situs_zip IS NOT NULL`,
+  );
   const listing = JSON.stringify(['geo_id', 'owner_name', 'mailing_address', 'deed_date']);
   void listing;
   await db.run(`INSERT INTO properties BY NAME
@@ -265,7 +278,8 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
     SELECT pj.*, coalesce(pr.lat, pj.lat) AS radius_lat, coalesce(pr.lon, pj.lon) AS radius_lon
     FROM permits_joined pj JOIN properties pr ON pr.property_id = pj.property_id AND pr.property_cid = pj.property_cid`);
   const inserted = await db.scalar('SELECT count(*) FROM permits');
-  if (inserted !== joined) throw new Error(`permits whose property_cid disagrees with the property: ${joined - inserted}`);
+  if (inserted !== joined)
+    throw new Error(`permits whose property_cid disagrees with the property: ${joined - inserted}`);
   await db.run(`DROP TABLE permits_joined`);
   lap('permits', t);
 
@@ -294,6 +308,19 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
     SELECT 'zip:' || situs_zip, 'zip', situs_zip, situs_zip, avg(lat), avg(lon), count(*),
       'centroid of ' || format('{:,}', count(lat)) || ' parcels with situs ZIP ' || situs_zip
     FROM properties WHERE situs_zip IS NOT NULL GROUP BY situs_zip HAVING count(lat) > 0`);
+  // reviewed aliases (decisions.md 20 / contract "Search center"): a name people use for a roll city; kept only where the target exists
+  const aliases: [string, string][] = [
+    ['westlake', 'city:westlakehills'],
+    ['atx', 'city:austin'],
+    ['austintx', 'city:austin'],
+    ['austintexas', 'city:austin'],
+    ['beecave', 'city:beecaves'],
+  ];
+  for (const [alias, center] of aliases) {
+    await db.run(
+      `INSERT INTO search_center_aliases SELECT ${q(alias)}, center_id, 'travis-center-alias.v1' FROM search_centers WHERE center_id = ${q(center)}`,
+    );
+  }
   lap('derived', t);
 
   // ---- contractors, registry, licenses -----------------------------------------------------------------------------
@@ -309,7 +336,16 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
   // ---- indexes, FTS, checkpoint ------------------------------------------------------------------------------------
   t = performance.now();
   const textIndexRows = await db.scalar('SELECT count(*) FROM permit_text');
-  await insertDeployRow(db, { dbFile: o.dbFile, deployId: o.deployId, inputsSha256: o.inputsSha256, serverCommit: o.serverCommit } as BuildOptions, textIndexRows);
+  await insertDeployRow(
+    db,
+    {
+      dbFile: o.dbFile,
+      deployId: o.deployId,
+      inputsSha256: o.inputsSha256,
+      serverCommit: o.serverCommit,
+    } as BuildOptions,
+    textIndexRows,
+  );
   await postLoad(db);
   lap('post_load', t);
 

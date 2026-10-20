@@ -31,7 +31,12 @@ export class Db {
     return Number(Object.values(r)[0]);
   }
   /** Writes `rows` as NDJSON to `tmpFile` and inserts them into `table` by column name. */
-  async insertJson(table: string, rows: readonly object[], tmpFile: string, columnsSpec?: string): Promise<void> {
+  async insertJson(
+    table: string,
+    rows: readonly object[],
+    tmpFile: string,
+    columnsSpec?: string,
+  ): Promise<void> {
     if (rows.length === 0) return;
     writeFileSync(tmpFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const src = columnsSpec
