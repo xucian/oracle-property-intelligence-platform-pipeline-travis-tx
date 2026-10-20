@@ -12,6 +12,7 @@ import example from '../config.example.json' with { type: 'json' };
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const config = parseConfig({ ...example, chatReservedConcurrency: 3 });
+const SECRET_ARN = `arn:aws:secretsmanager:us-east-2:${config.account}:secret:staraptor-agent/langsmith-api-key-??????`;
 const env = { account: config.account, region: config.region };
 
 function fixtureDirs() {
@@ -41,7 +42,7 @@ beforeAll(() => {
   unreserved = Template.fromStack(
     new TravisApi(app2, 'TravisApi', {
       env,
-      config: parseConfig(example),
+      config: parseConfig({ ...example, chatReservedConcurrency: 0 }),
       imageDirectory: dirs.image,
     }),
   );
@@ -96,13 +97,14 @@ describe('TravisApi stack', () => {
 
   it('gives chat a 28 s timeout, the reservation when R > 0, and none when 0', () => {
     api.hasResourceProperties('AWS::Lambda::Function', {
-      Environment: { Variables: Match.objectLike({ POWERTOOLS_SERVICE_NAME: 'travis-chat' }) },
+      Environment: { Variables: Match.objectLike({ POWERTOOLS_SERVICE_NAME: 'staraptor-agent' }) },
       Timeout: 28,
       ReservedConcurrentExecutions: 3,
     });
     const chat = Object.values(unreserved.findResources('AWS::Lambda::Function')).find(
       (f) =>
-        (f as Json).Properties.Environment?.Variables?.POWERTOOLS_SERVICE_NAME === 'travis-chat',
+        (f as Json).Properties.Environment?.Variables?.POWERTOOLS_SERVICE_NAME ===
+        'staraptor-agent',
     ) as Json;
     expect(chat.Properties).not.toHaveProperty('ReservedConcurrentExecutions');
   });
@@ -131,7 +133,12 @@ describe('TravisApi stack', () => {
       Environment: {
         Variables: Match.objectLike({
           CHAT_FLAG_PARAM: '/travis/chat/budget-exhausted',
-          BEDROCK_MODEL_ID: 'us.anthropic.claude-opus-5-5',
+          BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6',
+          POWERTOOLS_SERVICE_NAME: 'staraptor-agent',
+          POWERTOOLS_METRICS_NAMESPACE: 'staraptor-agent',
+          LANGSMITH_PROJECT: 'staraptor-agent',
+          LANGSMITH_TRACING: 'true',
+          LANGSMITH_API_KEY_SECRET_ID: 'staraptor-agent/langsmith-api-key',
         }),
       },
     });
@@ -178,18 +185,49 @@ describe('TravisApi stack', () => {
         'bedrock:InvokeModelWithResponseStream',
       ]);
       expect(bedrock.resources).toEqual([
-        `arn:aws:bedrock:us-east-2:${config.account}:inference-profile/us.anthropic.claude-opus-5-5`,
-        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-5-5',
-        'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-5-5',
-        'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-5-5',
+        `arn:aws:bedrock:us-east-2:${config.account}:inference-profile/us.anthropic.claude-sonnet-4-6`,
+        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-6',
+        'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-6',
+        'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-6',
       ]);
       const ssm = s.find((x) => x.actions.includes('ssm:GetParameter'))!;
       expect(ssm.actions).toEqual(['ssm:GetParameter']);
       expect(JSON.stringify(ssm.resources)).toContain('ChatBudgetFlag');
+      const secret = s.filter((x) => x.actions.some((a) => a.startsWith('secretsmanager:')));
+      expect(secret).toEqual([
+        { actions: ['secretsmanager:GetSecretValue'], resources: [SECRET_ARN] },
+      ]);
+      // exactly these grants: Bedrock invoke, the one secret, the flag, the serving set, X-Ray (and the basic logs role)
+      for (const a of allActions(s))
+        expect(a).toMatch(
+          /^(bedrock:Invoke|secretsmanager:GetSecretValue$|ssm:GetParameter$|s3:GetObject$|xray:|ecr:|logs:)/,
+        );
       const flat = JSON.stringify(s);
-      for (const denied of ['aws-marketplace', 'ssm:PutParameter', 'secretsmanager']) {
+      for (const denied of ['aws-marketplace', 'ssm:PutParameter', 'bedrock:*']) {
         expect(flat).not.toContain(denied);
       }
+      // only X-Ray's statement has a wildcard resource (its actions take none)
+      for (const x of s.filter((y) => y.resources.includes('*')))
+        for (const a of x.actions) expect(a).toMatch(/^xray:/);
+    });
+
+    it('derives the foundation-model ARNs of an Opus 4.6 profile (its id ends in -v1)', () => {
+      const t = Template.fromStack(
+        new TravisApi(new App(), 'TravisApi', {
+          env,
+          config: parseConfig({ ...example, bedrockModelId: 'us.anthropic.claude-opus-4-6-v1' }),
+          imageDirectory: fixtureDirs().image,
+        }),
+      );
+      const bedrock = statementsFor(t, 'ChatFunction').find((x) =>
+        x.actions.some((a) => a.startsWith('bedrock:')),
+      )!;
+      expect(bedrock.resources).toEqual([
+        `arn:aws:bedrock:us-east-2:${config.account}:inference-profile/us.anthropic.claude-opus-4-6-v1`,
+        'arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1',
+        'arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-opus-4-6-v1',
+        'arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-opus-4-6-v1',
+      ]);
     });
 
     it('flag writer: ssm:PutParameter on the flag only', () => {
@@ -261,8 +299,8 @@ describe('TravisApi stack', () => {
         }),
         RouteSettings: {
           'POST /v1/agent/chat': Match.objectLike({
-            ThrottlingRateLimit: 1,
-            ThrottlingBurstLimit: 3,
+            ThrottlingRateLimit: 0.4,
+            ThrottlingBurstLimit: 5,
           }),
           'GET /v1/permits/text-search': Match.objectLike({
             ThrottlingRateLimit: 5,
@@ -308,7 +346,7 @@ describe('TravisApi stack', () => {
     it('has at most ten alarms, all notifying the one email-only topic and self-resolving', () => {
       const alarms = Object.values(api.findResources('AWS::CloudWatch::Alarm')) as Json[];
       expect(alarms.length).toBeLessThanOrEqual(10);
-      expect(alarms.length).toBe(8);
+      expect(alarms.length).toBe(9);
       for (const a of alarms) {
         expect(a.Properties.AlarmActions).toHaveLength(1);
         expect(a.Properties.OKActions).toHaveLength(1);
@@ -330,6 +368,31 @@ describe('TravisApi stack', () => {
         Period: 86400,
         Statistic: 'Sum',
         Threshold: config.dailyChatRequestLimit,
+      });
+    });
+
+    it("daily token alarm sums the agent's input and output tokens and also sets the kill switch", () => {
+      const alarm = Object.values(api.findResources('AWS::CloudWatch::Alarm')).find(
+        (a) => (a as Json).Properties.AlarmName === 'travis-chat-daily-tokens',
+      ) as Json;
+      expect(alarm.Properties.Threshold).toBe(config.dailyChatTokenLimit);
+      const metrics = alarm.Properties.Metrics as Json[];
+      expect(metrics.find((m) => m.Expression)?.Expression).toBe('input + output');
+      const names = metrics
+        .filter((m) => m.MetricStat)
+        .map((m) => m.MetricStat.Metric.MetricName)
+        .sort();
+      expect(names).toEqual(['ChatInputTokens', 'ChatOutputTokens']);
+      for (const m of metrics.filter((x) => x.MetricStat)) {
+        expect(m.MetricStat.Metric.Namespace).toBe('staraptor-agent');
+        expect(m.MetricStat.Period).toBe(86400);
+      }
+      api.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            BUDGET_ALARM_NAMES: 'travis-chat-daily-usage,travis-chat-daily-tokens',
+          }),
+        },
       });
     });
 
@@ -531,12 +594,18 @@ describe('config', () => {
     expect(() => parseConfig({ ...example, region: 'us-west-2' })).toThrow();
     expect(() => parseConfig({ ...example, alarmEmails: [] })).toThrow();
   });
-  it('defaults the model to the Opus 5.5 profile and chat reservation to unreserved', () => {
+  it('defaults the model to the Sonnet 4.6 profile and chat reservation to unreserved', () => {
     const rest: Json = { ...example };
     delete rest.bedrockModelId;
     delete rest.chatReservedConcurrency;
     const parsed = parseConfig(rest);
-    expect(parsed.bedrockModelId).toBe('us.anthropic.claude-opus-5-5');
+    expect(parsed.bedrockModelId).toBe('us.anthropic.claude-sonnet-4-6');
     expect(parsed.chatReservedConcurrency).toBe(0);
+    expect(parsed.langsmithSecretName).toBe('staraptor-agent/langsmith-api-key');
+  });
+  it('the example config reserves R = 5 for chat with the route throttle R / p95 (decisions.md section 32)', () => {
+    expect(example.chatReservedConcurrency).toBe(5);
+    expect(example.throttle.routes['POST /v1/agent/chat']).toEqual({ rate: 0.4, burst: 5 });
+    expect(example.bedrockModelId).toBe('us.anthropic.claude-sonnet-4-6');
   });
 });

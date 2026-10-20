@@ -100,20 +100,41 @@ deploy-api: _need-profile _need-docker build-api serving (stage-db "current")
     if [ -z "$b" ] || [ "$b" = "None" ]; then upload "$(bucket)"; fi
     just profile="{{ profile }}" warm
 
-# Open and prime n API instances now: after a deploy (deploy-api runs it) and before a live demo (decisions.md section 31).
-warm n="3": _need-profile
+# After a deploy (deploy-api runs it) and before a live demo (decisions.md sections 31 and 32); no model call.
+# Open and prime n API instances and c chat instances now.
+warm n="3" c="2": _need-profile
     #!/usr/bin/env bash
     set -euo pipefail
     export PATH="/opt/homebrew/bin:$PATH"
-    n="{{ n }}"
-    fn="$(aws cloudformation describe-stacks --stack-name TravisApi --region {{ region }} --profile "{{ profile }}" \
-      --query "Stacks[0].Outputs[?OutputKey=='ApiFunctionName'].OutputValue" --output text)"
-    for ((i = 0; i < n; i++)); do
-      aws lambda invoke --region {{ region }} --profile "{{ profile }}" --function-name "$fn" --invocation-type Event \
-        --cli-binary-format raw-in-base64-out --payload '{"warm":{"hold_ms":1500}}' /dev/null >/dev/null &
-    done
+    out() { aws cloudformation describe-stacks --stack-name TravisApi --region {{ region }} --profile "{{ profile }}" \
+      --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+    fn="$(out ApiFunctionName)"
+    chat="$(out ChatFunctionName)"
+    send() {
+      for ((i = 0; i < $2; i++)); do
+        aws lambda invoke --region {{ region }} --profile "{{ profile }}" --function-name "$1" --invocation-type Event \
+          --cli-binary-format raw-in-base64-out --payload '{"warm":{"hold_ms":1500}}' /dev/null >/dev/null &
+      done
+    }
+    send "$fn" "{{ n }}"
+    send "$chat" "{{ c }}"
     wait
-    echo "warm: $n warm-ups sent to $fn (each opens and primes one instance)"
+    echo "warm: {{ n }} warm-ups sent to $fn, {{ c }} to $chat (each opens and primes one instance)"
+
+# The README two-turn conversation, one out-of-scope and one prompt injection, with the operator's credentials and real Bedrock.
+# SAM local for the chat function (decisions.md section 32): SAM builds the image from cdk.out, then runs three cases.
+sam-local: _need-profile _need-docker build-api (stage-db "current")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="/opt/homebrew/bin:$PATH" SAM_CLI_TELEMETRY=0
+    export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
+    (cd "{{ cdk_dir }}" && CDK_CONFIG="{{ cdk_config }}" npx cdk synth TravisApi --strict --quiet -c sam-local=1)
+    sam build ChatFunction3D7C447E -t "{{ cdk_dir }}/cdk.out/TravisApi.template.json" --use-buildkit --build-dir apps/api/build/sam
+    AWS_PROFILE="{{ profile }}" npx tsx apps/api/scripts/sam-local.ts apps/api/build/sam/template.yaml apps/api/build/sam
+
+# Replay the golden set (fixtures/rag/queries) against a base URL: just golden "$API_BASE". Writes fixtures/rag/results/.
+golden target:
+    npx tsx apps/api/scripts/golden.ts --target "{{ target }}"
 
 [private]
 build-api:

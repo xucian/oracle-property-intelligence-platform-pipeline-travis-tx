@@ -1,5 +1,13 @@
 import { join } from 'node:path';
-import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps, Tags } from 'aws-cdk-lib';
+import {
+  CfnOutput,
+  type CfnResource,
+  Duration,
+  RemovalPolicy,
+  Stack,
+  type StackProps,
+  Tags,
+} from 'aws-cdk-lib';
 import {
   Alarm,
   ComparisonOperator,
@@ -46,7 +54,10 @@ import { LOG_RETENTION, pinLambdaLogGroups } from './logs.js';
 
 export const CHAT_FLAG_PARAM = '/travis/chat/budget-exhausted';
 export const DAILY_USAGE_ALARM_NAME = 'travis-chat-daily-usage';
+export const DAILY_TOKENS_ALARM_NAME = 'travis-chat-daily-tokens';
 export const METRICS_NAMESPACE = 'TravisPropertyIntelligence';
+/** The chat function's runtime name (decisions.md sections 20 and 32): its Powertools service and metrics namespace. */
+export const AGENT_NAME = 'staraptor-agent';
 
 export interface TravisApiProps extends StackProps {
   config: TravisConfig;
@@ -63,7 +74,7 @@ exports.handler = async (event) => {
   for (const record of event.Records ?? []) {
     let message;
     try { message = JSON.parse(record.Sns.Message); } catch { continue; }
-    if (message.AlarmName === process.env.DAILY_USAGE_ALARM_NAME && message.NewStateValue === 'ALARM') set = true;
+    if (process.env.BUDGET_ALARM_NAMES.split(',').includes(message.AlarmName) && message.NewStateValue === 'ALARM') set = true;
   }
   if (!set) return { set: false };
   await ssm.send(new PutParameterCommand({ Name: process.env.CHAT_FLAG_PARAM, Value: 'true', Type: 'String', Overwrite: true }));
@@ -145,11 +156,29 @@ export class TravisApi extends Stack {
         config.chatReservedConcurrency > 0 ? config.chatReservedConcurrency : undefined,
       environment: {
         ...sharedEnv,
-        POWERTOOLS_SERVICE_NAME: 'travis-chat',
+        POWERTOOLS_SERVICE_NAME: AGENT_NAME,
+        POWERTOOLS_METRICS_NAMESPACE: AGENT_NAME,
         CHAT_FLAG_PARAM,
         BEDROCK_MODEL_ID: config.bedrockModelId,
+        // the key itself is read from Secrets Manager at run time, never put in the environment (decisions.md section 21)
+        LANGSMITH_API_KEY_SECRET_ID: config.langsmithSecretName,
+        LANGSMITH_PROJECT: config.langsmithProject,
+        LANGSMITH_TRACING: 'true',
       },
     });
+
+    // `cdk synth -c sam-local=1` only (`just sam-local`): the asset metadata SAM's CDK support reads to build the image
+    // from cdk.out (decisions.md section 32). The functions take the shared asset through fromEcr, so CDK writes none;
+    // the deployed template stays without it.
+    if (this.node.tryGetContext('sam-local')) {
+      for (const fn of [apiFn, chatFn]) {
+        const cfn = fn.node.defaultChild as CfnResource;
+        cfn.addMetadata('aws:asset:path', `asset.${image.assetHash}`);
+        cfn.addMetadata('aws:asset:dockerfile-path', 'Dockerfile');
+        cfn.addMetadata('aws:asset:property', 'Code.ImageUri');
+        cfn.addMetadata('SamResourceId', fn === chatFn ? 'ChatFunction' : 'ApiFunction');
+      }
+    }
 
     // --- Both functions read the serving set and nothing else in the bucket (no ListBucket: names are exact) ---
     for (const fn of [apiFn, chatFn])
@@ -182,6 +211,17 @@ export class TravisApi extends Stack {
           ...config.bedrockRoutingRegions.map(
             (r) => `arn:aws:bedrock:${r}::foundation-model/${modelId}`,
           ),
+        ],
+      }),
+    );
+    // The LangSmith key: one secret, created out of band and imported by name (decisions.md section 21)
+    chatFn.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'ReadLangSmithKey',
+        effect: Effect.ALLOW,
+        actions: ['secretsmanager:GetSecretValue'],
+        resources: [
+          `arn:aws:secretsmanager:${config.region}:${config.account}:secret:${config.langsmithSecretName}-??????`,
         ],
       }),
     );
@@ -291,7 +331,7 @@ export class TravisApi extends Stack {
       logGroup: flagWriterLogs,
       environment: {
         CHAT_FLAG_PARAM,
-        DAILY_USAGE_ALARM_NAME,
+        BUDGET_ALARM_NAMES: `${DAILY_USAGE_ALARM_NAME},${DAILY_TOKENS_ALARM_NAME}`,
         METRICS_NAMESPACE,
       },
     });
@@ -326,7 +366,7 @@ export class TravisApi extends Stack {
     // No standing warm-up schedule (decisions.md section 31): the README rules out ongoing cost by default, so
     // instances are warmed by `just warm` after a deploy and by the clients' prewarm when a person opens them.
 
-    // --- Alarms (8 of the 10 allowed; all self-resolving) ---
+    // --- Alarms (9 of the 10 allowed; all self-resolving) ---
     const five = Duration.minutes(5);
     const mk = (id: string, alarm: ConstructorParameters<typeof Alarm>[2]) => {
       const a = new Alarm(this, id, { treatMissingData: TreatMissingData.NOT_BREACHING, ...alarm });
@@ -383,6 +423,30 @@ export class TravisApi extends Stack {
       alarmDescription: 'Chat invocations in a UTC day; sets the budget kill switch through SNS',
       metric: chatFn.metricInvocations({ period: Duration.days(1), statistic: 'Sum' }),
       threshold: config.dailyChatRequestLimit,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+    });
+    const chatMetric = (metricName: string, statistic = 'Sum', period = Duration.days(1)) =>
+      new Metric({
+        namespace: AGENT_NAME,
+        metricName,
+        dimensionsMap: { service: AGENT_NAME, operation: 'agentChat' },
+        statistic,
+        period,
+      });
+    mk('ChatDailyTokensAlarm', {
+      alarmName: DAILY_TOKENS_ALARM_NAME,
+      alarmDescription:
+        'Bedrock input plus output tokens of chat in a UTC day; sets the budget kill switch through SNS',
+      metric: new MathExpression({
+        expression: 'input + output',
+        usingMetrics: {
+          input: chatMetric('ChatInputTokens'),
+          output: chatMetric('ChatOutputTokens'),
+        },
+        period: Duration.days(1),
+      }),
+      threshold: config.dailyChatTokenLimit,
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
     });
@@ -448,6 +512,35 @@ export class TravisApi extends Stack {
             left: [
               apiFn.metricDuration({ period: five, statistic: 'p95' }),
               chatFn.metricDuration({ period: five, statistic: 'p95' }),
+            ],
+            width: 8,
+          }),
+        ],
+        [
+          new GraphWidget({
+            title: 'Chat turn latency (p50, p95 ms)',
+            left: [
+              chatMetric('ChatTurnLatency', 'p50', five),
+              chatMetric('ChatTurnLatency', 'p95', five),
+            ],
+            width: 8,
+          }),
+          new GraphWidget({
+            title: 'Chat tokens (input, output, cache read)',
+            left: [
+              chatMetric('ChatInputTokens', 'Sum', five),
+              chatMetric('ChatOutputTokens', 'Sum', five),
+              chatMetric('ChatCacheReadTokens', 'Sum', five),
+            ],
+            width: 8,
+          }),
+          new GraphWidget({
+            title: 'Chat deadline hits, citation failures, Bedrock throttles and denials',
+            left: [
+              chatMetric('ChatDeadlineHits', 'Sum', five),
+              chatMetric('ChatCitationFailures', 'Sum', five),
+              chatMetric('BedrockThrottles', 'Sum', five),
+              chatMetric('BedrockDenials', 'Sum', five),
             ],
             width: 8,
           }),

@@ -11,7 +11,8 @@ export const ConfigSchema = z.object({
   projectName: z.string().min(1).default('travis-property-intelligence'),
   account: z.string().regex(/^\d{12}$/, 'account must be a 12-digit AWS account id'),
   region: z.literal('us-east-2'),
-  bedrockModelId: z.string().min(1).default('us.anthropic.claude-opus-5-5'),
+  /** US cross-region inference profile (decisions.md section 32: Sonnet 4.6 won the golden set; 5.x is denied on the account). */
+  bedrockModelId: z.string().min(1).default('us.anthropic.claude-sonnet-4-6'),
   /** Regions the cross-region inference profile routes to (their foundation-model ARNs are granted). */
   bedrockRoutingRegions: z
     .array(z.string().min(1))
@@ -33,6 +34,10 @@ export const ConfigSchema = z.object({
     .default({ memoryLimit: '2GB', threads: 2 }),
   /** 0 = unreserved. Set R > 0 only after reading `aws lambda get-account-settings` (section 21, Concurrency). */
   chatReservedConcurrency: z.number().int().min(0).max(5).default(0),
+  /** Secrets Manager secret (plain string) holding the LangSmith API key, created out of band (decisions.md section 21). */
+  langsmithSecretName: z.string().min(1).default('staraptor-agent/langsmith-api-key'),
+  /** LangSmith project, the runtime name (decisions.md section 20, "Observability"). */
+  langsmithProject: z.string().min(1).default('staraptor-agent'),
   throttle: z.object({
     stage: rate,
     routes: z.record(z.string(), rate),
@@ -44,6 +49,8 @@ export const ConfigSchema = z.object({
   }),
   /** Invocations of the chat function per UTC day above which the kill switch is set. */
   dailyChatRequestLimit: z.number().int().positive().default(200),
+  /** Bedrock input plus output tokens of chat per UTC day above which the kill switch is set. */
+  dailyChatTokenLimit: z.number().int().positive().default(5_000_000),
   alarmEmails: z.array(z.email()).min(1),
   /** The TravisApi `ApiBase` output, copied here only as a fallback for `just build-explorer`. */
   viteApiUrl: z.url().optional(),
