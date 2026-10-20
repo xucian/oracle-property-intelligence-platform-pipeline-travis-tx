@@ -258,7 +258,7 @@ export function turnAssumptions(c: EvidenceCollector, usedCenters: CenterPoint[]
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(
-      `Search center ${s.name} (${s.kind}, ${s.match_type} match): ${s.basis}; distances are measured from that centroid.`,
+      `Search center ${s.name} (${s.kind}, ${s.match_type} match): ${s.parcel_count.toLocaleString('en-US')} parcels; ${s.basis} (those with coordinates); distances are measured from that centroid.`,
     );
   }
   if (c.seen.contractors > 0)

@@ -351,7 +351,10 @@ describe('evidence builder', () => {
       turnLimitations(META, c).find((l) => l.incomplete_reason === 'needs_review')!.detail,
     ).toMatch(/^1 of the 3 permits/);
     const a = turnAssumptions(c, [AUSTIN]);
-    expect(a[0]).toContain('centroid of 124,832 parcels with situs city AUSTIN');
+    // both counts, so the parcel count the model quotes (129,473) and the centroid's (124,832) read as one statement
+    expect(a[0]).toBe(
+      'Search center AUSTIN (city, exact match): 129,473 parcels; centroid of 124,832 parcels with situs city AUSTIN (those with coordinates); distances are measured from that centroid.',
+    );
     expect(a).toContain(
       'Contractors are the listed contractor as printed on the permit, not a verified identity.',
     );
