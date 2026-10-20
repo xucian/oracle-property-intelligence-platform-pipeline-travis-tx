@@ -1,52 +1,14 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Queries, DEFAULT_LIMITS, servingFromEnv } from '@travis/query';
-import type { Meta } from '@travis/contract';
+import { DEFAULT_LIMITS, type Queries } from '@travis/query';
 import { App, type HttpRequest } from '../app.js';
+import { limitsFromEnv, queriesLoader } from '../db.js';
 import { createObservability } from '../observability.js';
 import { PRIME } from '../warm.js';
 
 const { observer, logger } = createObservability('travis-api');
-const dbPath = (): string => process.env.DUCKDB_PATH ?? '/opt/db/serving.duckdb';
 
-function limitsFromEnv(): Meta['limits'] | undefined {
-  const raw = process.env.LIMITS_JSON;
-  if (!raw) return undefined;
-  const parsed = JSON.parse(raw) as Partial<Meta['limits']>;
-  return { ...DEFAULT_LIMITS, ...parsed } as Meta['limits'];
-}
-
-let queries: Promise<Queries> | null = null;
-/**
- * Opened on first use (in Lambda: at init) and reused across warm invocations; a failed open is
- * retried by the next request. With SERVING_BASE set (the deployed functions), DUCKDB_PATH is the serving file and the
- * large tables are read from the private deploy bucket (decisions.md section 30).
- */
-export function getQueries(): Promise<Queries> {
-  if (!queries) {
-    const t0 = performance.now();
-    const p = (async () => {
-      const q = await Queries.open({
-        dbPath: dbPath(),
-        serving: servingFromEnv(),
-        memoryLimit: process.env.DUCKDB_MEMORY_LIMIT,
-        threads: process.env.DUCKDB_THREADS ? Number(process.env.DUCKDB_THREADS) : undefined,
-        tempDirectory: '/tmp',
-        extensionDirectory: process.env.DUCKDB_EXTENSION_DIR,
-        limits: limitsFromEnv(),
-      });
-      logger.info('cold start', {
-        open_ms: q.openMs,
-        ready_ms: Math.round(performance.now() - t0),
-      });
-      return q;
-    })();
-    p.catch(() => {
-      queries = null;
-    });
-    queries = p;
-  }
-  return queries;
-}
+/** The instance's query layer (opened at init in Lambda, reused while warm; see db.ts). */
+export const getQueries: () => Promise<Queries> = queriesLoader(logger);
 // Start at init, so the first request finds the instance ready or nearly so.
 if (process.env.AWS_LAMBDA_FUNCTION_NAME) getQueries().catch(() => undefined);
 
