@@ -7,7 +7,18 @@ import type { SqlEngine, SqlResult } from '../lib/duckdb.js';
 
 export type EngineLoader = () => Promise<SqlEngine>;
 
-const defaultLoader: EngineLoader = () => import('../lib/duckdb.js').then((m) => m.openDuckDb());
+let shared: Promise<SqlEngine> | null = null;
+/** DuckDB-WASM, started once per page; App starts it in the background shortly after load, so this tab finds it ready. */
+export function preloadEngine(): Promise<SqlEngine> {
+  if (!shared) {
+    shared = import('../lib/duckdb.js').then((m) => m.openDuckDb());
+    shared.catch(() => {
+      shared = null;
+    });
+  }
+  return shared;
+}
+const defaultLoader: EngineLoader = preloadEngine;
 
 const PRESETS: { label: string; sql: (tables: string[]) => string }[] = [
   {
@@ -171,6 +182,13 @@ export function QueryLayer({ loadEngine = defaultLoader }: { loadEngine?: Engine
             <button type="button" onClick={() => void run()} disabled={status === 'loading'}>
               {status === 'loading' ? 'Starting DuckDB-WASM…' : 'Run query'}
             </button>
+            {status === 'loading' ? (
+              <p className="notice" role="status">
+                Starting DuckDB-WASM in this browser: the engine (about 8 MB) downloads once and
+                opens, which can take 5-20 seconds on a first visit. The query then runs here,
+                reading the Parquet mirror directly; no server is involved.
+              </p>
+            ) : null}
           </>
         ) : null}
         {error ? (

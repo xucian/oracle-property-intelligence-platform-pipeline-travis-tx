@@ -112,11 +112,12 @@ export function Summary() {
         {m.limitations.length === 0 ? (
           <p>None recorded.</p>
         ) : (
-          <ul>
+          <ul className="limitations">
             {m.limitations.map((l, i) => (
               <li key={`${l.source}-${i}`}>
                 <strong>{l.source}</strong>: {l.availability} / access {l.source_access_status}
-                {l.incomplete_reason ? ` (${l.incomplete_reason})` : ''}. {l.detail}
+                {l.incomplete_reason ? ` (${l.incomplete_reason})` : ''}.{' '}
+                <span className="muted">{l.detail}</span>
               </li>
             ))}
           </ul>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Agent } from './screens/Agent.js';
 import { Manifest } from './screens/Manifest.js';
 import { Mcp } from './screens/Mcp.js';
-import { QueryLayer } from './screens/QueryLayer.js';
+import { QueryLayer, preloadEngine } from './screens/QueryLayer.js';
 import { Records } from './screens/Records.js';
 import { Runs } from './screens/Runs.js';
 import { Search } from './screens/Search.js';
@@ -30,6 +30,11 @@ export function App() {
   const [route, setRoute] = useState(() =>
     parseHash(typeof location === 'undefined' ? '' : location.hash),
   );
+  // DuckDB-WASM is browser-only: start it once the first screen has loaded, so the query tab finds it ready
+  useEffect(() => {
+    const t = setTimeout(() => void preloadEngine().catch(() => undefined), 1500);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     const onChange = () => setRoute(parseHash(location.hash));
     window.addEventListener('hashchange', onChange);

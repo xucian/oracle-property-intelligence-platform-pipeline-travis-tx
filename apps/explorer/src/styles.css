@@ -33,6 +33,23 @@ body {
   margin: 0;
   background: var(--bg);
 }
+:root {
+  color-scheme: light dark;
+}
+a,
+a:visited {
+  color: var(--accent);
+}
+.limitations {
+  padding-left: 20px;
+}
+.limitations li {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.limitations strong {
+  color: var(--accent);
+}
 .app {
   max-width: 1200px;
   margin: 0 auto;
