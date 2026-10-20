@@ -3,7 +3,7 @@ import { Queries, DEFAULT_LIMITS, servingFromEnv } from '@travis/query';
 import type { Meta } from '@travis/contract';
 import { App, type HttpRequest } from '../app.js';
 import { createObservability } from '../observability.js';
-import { PRIME, imageFiles, prefetch, type PrefetchResult } from '../warm.js';
+import { PRIME } from '../warm.js';
 
 const { observer, logger } = createObservability('travis-api');
 const dbPath = (): string => process.env.DUCKDB_PATH ?? '/opt/db/serving.duckdb';
@@ -15,29 +15,16 @@ function limitsFromEnv(): Meta['limits'] | undefined {
   return { ...DEFAULT_LIMITS, ...parsed } as Meta['limits'];
 }
 
-let prefetched: Promise<PrefetchResult | null> | null = null;
-/** Once per instance in Lambda: the image files DuckDB opens first, read ahead in large chunks (section 31). */
-function prefetchOnce(): Promise<PrefetchResult | null> {
-  if (!process.env.AWS_LAMBDA_FUNCTION_NAME) return Promise.resolve(null);
-  prefetched ??= imageFiles(dbPath(), process.env.DUCKDB_EXTENSION_DIR)
-    .then((files) => prefetch(files))
-    .catch((err: unknown) => {
-      logger.warn('prefetch failed', { error: String(err) });
-      return null;
-    });
-  return prefetched;
-}
-
 let queries: Promise<Queries> | null = null;
 /**
- * Opened on first use (in Lambda: at init, after the prefetch) and reused across warm invocations; a failed open is
+ * Opened on first use (in Lambda: at init) and reused across warm invocations; a failed open is
  * retried by the next request. With SERVING_BASE set (the deployed functions), DUCKDB_PATH is the serving file and the
  * large tables are read from the private deploy bucket (decisions.md section 30).
  */
 export function getQueries(): Promise<Queries> {
   if (!queries) {
     const t0 = performance.now();
-    const p = prefetchOnce().then(async (pre) => {
+    const p = (async () => {
       const q = await Queries.open({
         dbPath: dbPath(),
         serving: servingFromEnv(),
@@ -48,14 +35,11 @@ export function getQueries(): Promise<Queries> {
         limits: limitsFromEnv(),
       });
       logger.info('cold start', {
-        prefetch_ms: pre?.ms,
-        prefetch_bytes: pre?.bytes,
-        prefetch_complete: pre?.complete,
         open_ms: q.openMs,
         ready_ms: Math.round(performance.now() - t0),
       });
       return q;
-    });
+    })();
     p.catch(() => {
       queries = null;
     });

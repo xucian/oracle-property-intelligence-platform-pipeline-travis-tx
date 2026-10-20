@@ -2033,10 +2033,12 @@ adjacent paths too; prefer an honest loading state and a prewarm triggered by re
   separate instances. `just warm n=3` sends n of them. `just deploy-api` ends with it, so the new image's slowest cold
   starts land on the deploy, and the operator runs it before a live demo and before marking the PRs ready for review.
   Cost: a few invocations per deploy or demo.
-- **Prefetch at init.** In Lambda each instance reads the bundled extensions and the serving file once, in 4 MB chunks
-  with 4 in flight, before DuckDB opens them. The open starts at init, not at the first request. The prefetch is
-  bounded at 3 s and its failures are logged, never raised. A `cold start` log line (prefetch, open and ready ms) on
-  every instance shows whether it pays. It costs nothing while the API is idle.
+- **A prefetch at init was measured and removed.** Each instance read the bundled extensions and the serving file in
+  4 MB chunks (4 in flight, bounded at 3 s) before DuckDB opened them. Deployed 2026-10-20 14:50Z. On the new image's
+  first instances it read 60-64 MB in about 4 s (15 MB/s) and was ready after 5.5 s: no faster than without it. On cold
+  instances once the image was cached it read all 108 MB in 1.4-1.5 s, but the open still took 1.5 s. The CRM call's
+  handler took 4.2-4.3 s (6.4-6.6 s end to end), against 2.5 s (4.6 s) without the prefetch. DuckDB's own reads are
+  already fast there. Kept: the open starts at init, and every instance logs `cold start` (open and ready ms).
 - **Clients prewarm when a person opens them.** The explorer's API client sends the page's first call alone and holds
   the calls that start with it until it answers (`firstCallAlone` in `packages/api-client`). On an idle API they then
   land on the one instance it opened, instead of each opening a cold one. After 3 s `Loading` says why: "The first
@@ -2046,4 +2048,5 @@ adjacent paths too; prefer an honest loading state and a prewarm triggered by re
   still busy, so a quick retry only opens a second cold one. Its F5 agent's 8 s per call needs the same prewarm at the
   start of a chat.
 - **What a reviewer can still meet.** On an idle API, the first call after a quiet period takes about 5 s (8-9 s if
-  Lambda has dropped the image's cached blocks), behind a loading message that says why. Later calls take 0.6-3 s.
+  Lambda has dropped the image's cached blocks), behind a loading message that says why. On an instance a warm-up primed,
+  the CRM call's handler takes 0.3 s (1.6 s end to end, mostly its 500 items travelling); other calls take 0.6-3 s.
