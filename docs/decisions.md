@@ -1913,3 +1913,88 @@ Pinata call). The full verification ran (read-only) and its byte total is record
   a quota request, so check 1's cold-start times are measured at 3008 MB. Raising the memory needs a quota increase
   (Service Quotas, Lambda). The 10-execution cap also leaves no room for T9's reserved chat concurrency, because AWS keeps
   10 unreserved, so T9 needs that increase too.
+
+## 30. 2026-10-20: T7 correction — the large tables are served as Parquet from the private deploy bucket
+
+Replaces section 21's "DuckDB in Lambda" bullet and revises its "Secrets and IAM" bullet for the two functions.
+Contract v1 is unchanged. The operator approved the direction; the kit's `metagross` reviewed it once
+([`reviews/2026-10-20-metagross-serving-parquet-review.md`](./reviews/2026-10-20-metagross-serving-parquet-review.md)).
+
+- **Why.** Section 21 assumed that "Lambda loads image chunks lazily, so no cold start downloads 2 GB". For random reads
+  that is false. Measured on Lambda over six deploys, reading the 4 GB file baked into the image ran at 50 MB/s for the
+  first 100 MB, then about 4 MB/s. Cold radius and permit searches hit the 25 s timeout. A parallel warm-up (32 × 8 MB
+  reads) stalled the instance and was dropped (never committed). Downloading from our own CloudFront ran at about
+  5 MB/s. Check 1 itself passed on the first deploy (meta 200, cold 18.4 s; chat 503; the served `openapi.json` equal to
+  the committed one; MCP `structuredContent`).
+- **The serving set.** `deploy-build serving` (in `just deploy-api`, skipped when current) derives it from the
+  checkpointed file, which stays the build of record. Six zstd Parquet files go to the private deploy bucket under
+  `serving/<deploy_id>/`, content-named `<table>.<sha256-16>.parquet`, immutable, uploaded with their SHA-256 as the S3
+  checksum and listed with it in `deploy.json` (`serving` block):
+
+  | File | Sort | Row group | Size |
+  | --- | --- | --- | --- |
+  | `properties` | `floor(lat*40) NULLS LAST, lon, property_id` | 10,000 | 91 MB |
+  | `permits` | `is_roofing DESC, status_group, floor(radius_lat*40) NULLS LAST, radius_lon, permit_id` | 10,000 | 297 MB |
+  | `permit_text_rows` (the 541,912 text-indexed permits) | `permit_id` | 1,000 | 114 MB |
+  | `business_records` | `name_norm, source, business_record_id` | 10,000 | 64 MB |
+  | `property_extras`, `roof_age_reference` | `property_id` | 10,000 | 15 MB, 4 MB |
+
+  Every other `main` table, `permit_text` with its BM25 index rebuilt by `post_load.sql`'s own PRAGMA, a
+  `permit_text_filters` table (permit id, status group, roofing flag, radius point of the text-indexed permits) and
+  `serving_files` go into one 77 MB DuckDB file baked into the image (`/opt/db/serving.duckdb`, with `deploy.json`), well
+  inside the fast first 100 MB. `lex.*` (about 2.6 GB) is not exported: the API never reads it. The image went from about
+  4.5 GB to 0.6 GB.
+- **Serving mode in `Queries.open`.** It opens the serving file read-only as the main database and loads `fts` and
+  `httpfs`, both bundled in the image with pinned SHA-256s (`httpfs` `b18472a0…`), autoinstall off. It builds a
+  temporary S3 secret, scoped to the serving base, from the function role's credentials. One temporary view per
+  `serving_files` row, named after the table, so the SQL is the same in both modes. `deploy_id` comes from the baked
+  file, so the image and its Parquet set cannot drift. The Parquet metadata, HTTP metadata and external file caches are
+  on and the instance is reused, so a warm call reads nothing again. Then external access closes to all but the serving
+  prefix and `/tmp/`, and the configuration is locked: no SQL text can reach another URL or file (tested). Threads 4,
+  `memory_limit` 2 GB. Full-file mode stays for tests and local runs.
+- **Two query changes, both with equal outputs in the two modes.**
+  1. **Text search is computed in two steps.** Scores, filters, the total and the page's ids come from the local tables,
+     then one read by id fetches the page's full rows from `permit_text_rows`. The old join read the whole permits file:
+     62 s cold. An `IN` list on the radius-sorted file is not pruned (291 MB read), and a full id-sorted copy has an
+     11 MB footer every cold open would pay. So the copy holds only the text-indexed permits. In full-file mode both
+     relations are views over `permits`.
+  2. **`get_property` by `geo_id` answers the lowest `property_id`.** 1,160 geo_ids sit on 11,577 accounts. The answer
+     used to depend on the scan order, so the full file and the Parquet files gave different accounts. The contract
+     says nothing about this case, so the deterministic rule is not a contract change.
+- **IAM (section 21 revised).** The API and chat functions each get exactly `s3:GetObject` on
+  `<deploy bucket>/serving/*`; CDK template tests assert that it is their only S3 grant. No `ListBucket`, because names
+  are exact: a missing key answers 403, so the open error names the file and the deploy. No KMS, because the bucket is
+  SSE-S3. `serving/` has no expiry rule, so rolling back an image still finds its set; teardown's `autoDeleteObjects`
+  removes it.
+- **Private data stays private** (section 21, unchanged). The Parquet files sit in the private deploy bucket (Block
+  Public Access, TLS-only, SSE-S3), which is in no CloudFront origin.
+- **Gate before every deploy that changes the serving set or the query layer:**
+  `npx tsx packages/deploy-build/scripts/serving-gate.ts`. It runs every operation on a cold instance over a local Range
+  server at 5 MB/s in total plus 30 ms per request, timed from the start of `Queries.open`. Each answer must equal the
+  full file's; the CRM's main call must finish under 10 s and every operation under 15 s. Result 2026-10-20: **PASS**,
+  20 of 20 equal:
+
+  | Operation (cold, open included) | Time | Warm |
+  | --- | --- | --- |
+  | CRM call: `searchProperties` r5, roof age over 15, `open_permits` false, limit 500 | 8.6 s | 60 ms |
+  | `searchProperties` r5 (defaults) | 7.7 s | 39 ms |
+  | `searchProperties` county-wide (tenure 10, absentee), the slowest | 14.0 s | 61 ms |
+  | `searchPermits` open and stalled roofing r5 | 3.1 s | 25 ms |
+  | `searchPermitText` county-wide / r5 | 4.2 s / 4.0 s | about 100 ms |
+  | `getProperty`, `getPermit` | 4.0 s, 4.2 s | 21 ms, 33 ms |
+  | meta, runs, centers, licenses (local tables only) | 1.8 s (the open) | under 10 ms |
+
+  With `SERVING_BASE` and session credentials the same script reads the uploaded set from S3. On 2026-10-20 that
+  covered signing, the session token, TLS and region from the operator's machine: 20 of 20 equal. The times there are a
+  distant client's (open about 8 s), not Lambda's. The built arm64 image under the base image's runtime interface
+  emulator then answered `getPermit` and the CRM call from the real bucket (200, 500 items of 53,308), which covers the
+  bundled `httpfs` and the image's CA bundle.
+- **Review findings** (metagross, one pass): 1 and 2 (blocking: time cold from the open, warm calls too; test the S3
+  path before Lambda) applied as above; 4 (lock external access), 5 (exact grant, error names the file) and 7 (no expiry)
+  applied; 6 is moot because this section describes the code. **3 is not applied.** Rebuilding the secret on a 403 would
+  read the same environment variables, which do not change inside an execution environment, so it cannot help; a
+  failure of that kind shows as 5xx and fires the stage 5xx alarm.
+- **Cost.** About 0.66 GB more in S3 (about $0.02 a month) and roughly 20 to 300 GETs per cold operation (fractions of a
+  cent per thousand calls). No standing compute.
+- **Uploaded 2026-10-20:** `serving/e17c90aa0b91ccae/`, 6 objects, 585 MB, every checksum accepted by S3. Check 1 measures
+  the cold times on Lambda after the next `deploy-api`.

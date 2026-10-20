@@ -19,6 +19,8 @@ import { DEPLOY_ROOT, REPO_ROOT, SCHEMA_DIR, shardIds } from './env.js';
 import { buildFixture } from './fixture.js';
 import { HashCache, sha256FileRaw, sha256Hex } from './hash.js';
 import { mirror, stageInputs } from './mirror.js';
+import { uploadAll } from './s3.js';
+import { SERVING_DB_FILE, buildServing } from './serving.js';
 import { verifyInputs } from './verify.js';
 
 const log = (m: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${m}`);
@@ -35,7 +37,8 @@ function codeHash(): string {
           f !== 'cli.ts' &&
           f !== 'fixture.ts' &&
           f !== 'mirror.ts' &&
-          f !== 's3.ts',
+          f !== 's3.ts' &&
+          f !== 'serving.ts',
       )
       .sort()
       .map((f) => path.join(REPO_ROOT, 'packages', 'deploy-build', 'src', f)),
@@ -187,6 +190,89 @@ async function commandStage(args: string[]): Promise<void> {
   );
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** The deploy directory `data/deploy/current` points at, and its deploy.json. */
+function currentDeploy(): { dir: string; deployJsonFile: string; deployJson: Record<string, any> } {
+  const dir = path.join(DEPLOY_ROOT, 'current');
+  const deployJsonFile = path.join(dir, 'deploy.json');
+  if (!existsSync(deployJsonFile))
+    throw new Error(`${deployJsonFile} is missing: run build-db first`);
+  return { dir, deployJsonFile, deployJson: JSON.parse(readFileSync(deployJsonFile, 'utf8')) };
+}
+
+const servingCode = (): string =>
+  sha256Hex(readFileSync(path.join(REPO_ROOT, 'packages', 'deploy-build', 'src', 'serving.ts')));
+
+/** True when every file deploy.json's `serving` block names is on disk with its recorded size. */
+function servingPresent(dir: string, serving: Record<string, any> | undefined): boolean {
+  if (!serving || serving.code_sha256 !== servingCode()) return false;
+  const all = [serving.db, ...serving.files] as { file: string; bytes: number }[];
+  return all.every((f) => {
+    const p = path.join(dir, 'serving', f.file);
+    return existsSync(p) && statSync(p).size === f.bytes;
+  });
+}
+
+/** Exports the serving set (decisions.md section 30) of data/deploy/current and records it in deploy.json. */
+async function commandServing(args: string[]): Promise<void> {
+  const { dir, deployJsonFile, deployJson } = currentDeploy();
+  if (!args.includes('--force') && servingPresent(dir, deployJson.serving)) {
+    log(`serving set of ${deployJson.deploy_id} is up to date: skipping the export`);
+    return;
+  }
+  const t0 = performance.now();
+  const r = await buildServing({
+    fullDb: path.join(dir, 'travis.duckdb'),
+    outDir: path.join(dir, 'serving'),
+    threads: Number(flag(args, '--threads') ?? 8),
+    memoryLimit: flag(args, '--memory') ?? '12GB',
+    log,
+  });
+  deployJson.serving = {
+    code_sha256: servingCode(),
+    built_at: new Date().toISOString(),
+    wall_seconds: Math.round((performance.now() - t0) / 1000),
+    key_prefix: `serving/${deployJson.deploy_id}/`,
+    db: r.db,
+    files: r.files,
+    local_tables: r.localTables,
+  };
+  writeFileSync(deployJsonFile, JSON.stringify(deployJson, null, 2) + '\n');
+  const remote = r.files.reduce((n, f) => n + f.bytes, 0);
+  log(
+    `serving: ${r.files.length} Parquet files (${(remote / 1e6).toFixed(0)} MB) and ${SERVING_DB_FILE} (${(r.db.bytes / 1e6).toFixed(0)} MB) in ${deployJson.serving.wall_seconds}s`,
+  );
+}
+
+/** Uploads the serving Parquet files to the private deploy bucket under serving/<deploy_id>/ (immutable, SHA-256 checked). */
+async function commandUploadServing(args: string[]): Promise<void> {
+  const bucket = flag(args, '--bucket');
+  if (!bucket) throw new Error('upload-serving: --bucket <private deploy bucket> is required');
+  const { dir, deployJson } = currentDeploy();
+  if (!servingPresent(dir, deployJson.serving))
+    throw new Error(
+      'upload-serving: the serving set is missing or stale: run the serving command first',
+    );
+  const s3 = new S3Client({ region: flag(args, '--region') ?? 'us-east-2' });
+  const items = (deployJson.serving.files as { file: string; sha256: string; bytes: number }[]).map(
+    (f) => ({
+      key: `${deployJson.serving.key_prefix}${f.file}`,
+      file: path.join(dir, 'serving', f.file),
+      sha256: f.sha256,
+      size: f.bytes,
+    }),
+  );
+  const r = await uploadAll(s3, bucket, items, {
+    concurrency: 4,
+    contentType: 'application/vnd.apache.parquet',
+    dryRun: args.includes('--dry-run'),
+    log,
+  });
+  log(
+    `upload-serving: ${r.uploaded.length} uploaded, ${r.skipped.length} already present with the same checksum (s3://${bucket}/${deployJson.serving.key_prefix})`,
+  );
+}
+
 const [cmd = 'build-db', ...rest] = process.argv.slice(2);
 const main = cmd.startsWith('--')
   ? commandBuild([cmd, ...rest])
@@ -196,7 +282,11 @@ const main = cmd.startsWith('--')
       ? commandMirror(rest)
       : cmd === 'stage-inputs'
         ? commandStage(rest)
-        : Promise.reject(new Error(`unknown command ${cmd}`));
+        : cmd === 'serving'
+          ? commandServing(rest)
+          : cmd === 'upload-serving'
+            ? commandUploadServing(rest)
+            : Promise.reject(new Error(`unknown command ${cmd}`));
 main.catch((e) => {
   console.error(e instanceof Error ? e.message : e);
   process.exit(1);

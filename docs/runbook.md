@@ -563,7 +563,12 @@ Then say "T6 approved".
 Built offline on 2026-10-20 (decisions.md section 29). The DuckDB file is already built: `data/deploy/current` →
 deploy `e17c90aa0b91ccae`, 4.04 GB, from commit `e462172`, reconciled with T5 (441,939 properties, 1,986,484 permits
 on 237,531 parcels, roof age on 390,212). `npm run build-db -w @travis/deploy-build` rebuilds it (about 5 minutes, 16 GB
-peak memory) and skips the build when its inputs are unchanged. Everything below is run by the operator from the repository root.
+peak memory) and skips the build when its inputs are unchanged. The functions do not read that file: since the T7
+correction (decisions.md section 30) they read its serving set, a 77 MB file in the image plus six Parquet files (585 MB)
+in the private deploy bucket. `just deploy-api` exports, stages and uploads that set (each step skips what is current).
+Before any deploy that changes it or the query layer, the agent runs the gate,
+`npx tsx packages/deploy-build/scripts/serving-gate.ts` (it must print `PASS`).
+Everything below is run by the operator from the repository root.
 `PROFILE` is the AWS profile, `ACCOUNT` its 12-digit id.
 
 ### Setup (once)
@@ -587,9 +592,10 @@ PUPPETEER_SKIP_DOWNLOAD=1 npm ci
 just deploy-api
 ```
 
-The first `deploy-api` pushes an image of about 4.5 GB to ECR, so it can take 10-30 minutes; CDK asks once to approve the
-IAM changes. Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
-afterwards:
+`deploy-api` exports the serving set, uploads its Parquet files to the deploy bucket, then pushes an image of about
+0.6 GB to ECR; CDK asks once to approve IAM changes (since section 30: `s3:GetObject` on the bucket's `serving/*` for
+both functions). Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
+afterwards (once; already done on 2026-10-20):
 
 ```zsh
 just build-explorer deploy-web mirror
@@ -604,19 +610,21 @@ npm run stage-inputs -w @travis/deploy-build -- --bucket "$(aws cloudformation d
 ```zsh
 out() { aws cloudformation describe-stacks --stack-name TravisApi --region us-east-2 --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 API_BASE=$(out ApiBase); echo "$API_BASE"
+curl -s -o /dev/null -w 'crm %{http_code} %{time_total}s\n' "$API_BASE/v1/properties/search?lat=30.2672&lon=-97.7431&radius_miles=5&roof_age_min=15&open_permits=false&limit=500"
 curl -s -o /dev/null -w 'meta %{http_code} %{time_total}s\n' "$API_BASE/v1/meta"
 curl -s -o /dev/null -w 'chat %{http_code} %{time_total}s\n' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'
 curl -s "$API_BASE/v1/openapi.json" | shasum -a 256; shasum -a 256 packages/contract/openapi.json
 curl -s -X POST "$API_BASE/v1/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-06-18' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_properties","arguments":{"lat":30.2672,"lon":-97.7431,"radius_miles":1,"roof_age_min":15,"open_permits":false,"limit":2}}}' | head -c 900; echo
 ```
 
-Pass: `meta 200` and `chat 503`, each first (cold) request under 25 s (keep both times for the PR); the two SHA-256
+Pass: `crm 200` (the CRM's main call, the first and cold request; the gate's model gives about 9 s), `meta 200` and
+`chat 503`, each first (cold) request under 25 s (keep the times for the PR); the two SHA-256
 lines equal; the MCP answer has `structuredContent` with two properties and no `isError`.
 
 ### Check 2: throttle, alarm, kill switch and the log trace
 
 ```zsh
-for i in 1 2 3 4 5 6 7 8; do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}' & done; wait; echo
+for i in $(seq 30); do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}' & done; wait; echo
 aws cloudwatch set-alarm-state --region us-east-2 --alarm-name travis-chat-daily-usage --state-value ALARM --state-reason 'T7 check'
 sleep 90
 curl -s -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; echo
@@ -626,7 +634,8 @@ sleep 60
 for g in AccessLogGroupName ApiLogGroupName; do aws logs filter-log-events --region us-east-2 --log-group-name "$(out $g)" --filter-pattern "\"$RID\"" --query 'length(events)'; done
 ```
 
-Pass: at least one `429` among the eight codes (sent at once: sent one after another from a distant client, they arrive about 1.6 per second, which the 1-per-second rate with a burst of 3 absorbs); an alarm email for `travis-chat-daily-usage` arrives; the chat answer
+Pass: at least one `429` among the 30 codes (sent at once; eight were not enough on 2026-10-20, when 2 of 30 came back
+`429`: from a distant client the requests arrive spread out, and the 1-per-second rate with a burst of 3 absorbs them); an alarm email for `travis-chat-daily-usage` arrives; the chat answer
 after the pause says `"reason":"budget_exhausted"`; both log counts are at least 1.
 
 ### Check 3: the explorer on the live URL

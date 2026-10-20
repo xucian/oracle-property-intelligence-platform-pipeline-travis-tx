@@ -29,8 +29,60 @@ export type TextSearchParams = ReturnType<typeof textSearchParams>['_output'];
 export type BusinessSearchParams = ReturnType<typeof businessSearchParams>['_output'];
 export type LicenseSearchParams = ReturnType<typeof licenseSearchParams>['_output'];
 
+/**
+ * Serving mode (decisions.md section 30): `dbPath` is the small serving file (the small tables, permit_text and its
+ * text index, and `serving_files`); the large tables are Parquet files read through httpfs at
+ * `<base>/<deploy_id>/<file>`, behind views named after the tables, so the SQL below is the same in both modes.
+ */
+export interface ServingOptions {
+  /** `s3://<deploy bucket>/serving` in Lambda; an http(s) URL for local runs and tests. */
+  base: string;
+  /** Credentials for an s3:// base (the function role's, from the Lambda environment). */
+  s3?: { region: string; keyId: string; secret: string; sessionToken?: string };
+}
+
+/** Serving options from SERVING_BASE and the Lambda's AWS credential variables; undefined when SERVING_BASE is unset. */
+export function servingFromEnv(env: NodeJS.ProcessEnv = process.env): ServingOptions | undefined {
+  const base = env.SERVING_BASE;
+  if (!base) return undefined;
+  if (!base.startsWith('s3://')) return { base };
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY)
+    throw new Error(
+      'SERVING_BASE is an s3:// URL but AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY is unset',
+    );
+  return {
+    base,
+    s3: {
+      region: env.AWS_REGION ?? 'us-east-2',
+      keyId: env.AWS_ACCESS_KEY_ID,
+      secret: env.AWS_SECRET_ACCESS_KEY,
+      sessionToken: env.AWS_SESSION_TOKEN,
+    },
+  };
+}
+
+/** The permit columns the text search filters on before it reads any full row (decisions.md section 30). */
+export const PERMIT_TEXT_FILTER_COLUMNS = [
+  'permit_id',
+  'status_group',
+  'is_roofing',
+  'radius_lat',
+  'radius_lon',
+] as const;
+
+/**
+ * The two relations the text search reads. The serving set has permit_text_filters as a table in the serving file and
+ * permit_text_rows as an id-sorted Parquet file of the text-indexed permits; the full file has both as views over
+ * permits (supersets: the text search joins them with permit_text).
+ */
+const FULL_FILE_VIEWS: Record<string, string> = {
+  permit_text_filters: `SELECT ${PERMIT_TEXT_FILTER_COLUMNS.join(', ')} FROM permits`,
+  permit_text_rows: 'SELECT * FROM permits',
+};
+
 export interface QueryOptions {
   dbPath: string;
+  serving?: ServingOptions;
   memoryLimit?: string;
   threads?: number;
   tempDirectory?: string;
@@ -79,6 +131,57 @@ function bbox(lat: number, lon: number, radius: number, latC: string, lonC: stri
   return `${latC} BETWEEN ${lat - dLat} AND ${lat + dLat} AND ${lonC} BETWEEN ${lon - dLon} AND ${lon + dLon}`;
 }
 
+/**
+ * Loads httpfs, sets the S3 secret, creates one TEMP view per `serving_files` row (the serving file is read-only), then
+ * closes external access to everything but the serving prefix and the temp directory and locks the configuration, so no
+ * SQL text can reach any other URL or file.
+ */
+async function attachServing(
+  conn: DuckDBConnection,
+  s: ServingOptions,
+  deployId: string,
+  tempDirectory: string,
+): Promise<void> {
+  await conn.run('LOAD httpfs');
+  // Footers, HEAD results and the bytes read stay cached in the instance, which warm invocations reuse.
+  await conn.run('SET parquet_metadata_cache = true');
+  await conn.run('SET enable_http_metadata_cache = true');
+  await conn.run('SET enable_external_file_cache = true');
+  if (s.s3) {
+    const p = [
+      'TYPE s3',
+      `KEY_ID ${lit(s.s3.keyId)}`,
+      `SECRET ${lit(s.s3.secret)}`,
+      `REGION ${lit(s.s3.region)}`,
+      `SCOPE ${lit(s.base)}`,
+    ];
+    if (s.s3.sessionToken) p.push(`SESSION_TOKEN ${lit(s.s3.sessionToken)}`);
+    await conn.run(`CREATE TEMPORARY SECRET serving_s3 (${p.join(', ')})`);
+  }
+  const files = (
+    await conn.runAndReadAll('SELECT table_name, file FROM serving_files ORDER BY table_name')
+  ).getRowObjectsJson() as Row[];
+  if (files.length === 0) throw new Error('serving_files is empty');
+  const prefix = `${s.base.replace(/\/+$/, '')}/${deployId}/`;
+  for (const f of files) {
+    const url = `${prefix}${f.file}`;
+    try {
+      await conn.run(`CREATE TEMP VIEW ${f.table_name} AS SELECT * FROM read_parquet(${lit(url)})`);
+    } catch (e) {
+      // without s3:ListBucket a missing key answers 403, not 404
+      throw new Error(
+        `serving: cannot read ${url} for table ${f.table_name} of deploy ${deployId}: ${(e as Error).message}`,
+        { cause: e },
+      );
+    }
+  }
+  await conn.run(
+    `SET allowed_directories = [${lit(prefix)}, ${lit(`${tempDirectory.replace(/\/+$/, '')}/`)}]`,
+  );
+  await conn.run('SET enable_external_access = false');
+  await conn.run('SET lock_configuration = true');
+}
+
 export class Queries {
   private cache = new Map<string, unknown>();
   private constructor(
@@ -90,7 +193,10 @@ export class Queries {
     readonly openMs: number,
   ) {}
 
-  /** Opens the checkpointed file read-only with the memory, thread, temp and extension settings of the Lambda image. */
+  /**
+   * Opens the checkpointed file (or, in serving mode, the serving file) read-only with the memory, thread, temp and
+   * extension settings of the Lambda image.
+   */
   static async open(opts: QueryOptions): Promise<Queries> {
     const t0 = performance.now();
     const config: Record<string, string> = {
@@ -109,6 +215,11 @@ export class Queries {
       await conn.runAndReadAll('SELECT deploy_id FROM deploy')
     ).getRowObjectsJson() as Row[];
     if (dep.length !== 1) throw new Error('deploy table must hold exactly one row');
+    if (opts.serving)
+      await attachServing(conn, opts.serving, dep[0]!.deploy_id as string, config.temp_directory!);
+    else
+      for (const [name, select] of Object.entries(FULL_FILE_VIEWS))
+        await conn.run(`CREATE TEMP VIEW ${name} AS ${select}`);
     const sw = (
       await conn.runAndReadAll('SELECT sw FROM fts_main_permit_text.stopwords')
     ).getRowObjectsJson() as Row[];
@@ -577,7 +688,8 @@ export class Queries {
 
   private async propertyRow(where: string): Promise<Row | null> {
     const rows = await this.all(
-      `SELECT ${this.propCols(this.today())} FROM properties p WHERE ${where}`,
+      // a geo_id can sit on several accounts (1,160 do): the lowest property_id answers, in both modes
+      `SELECT ${this.propCols(this.today())} FROM properties p WHERE ${where} ORDER BY p.property_id LIMIT 1`,
     );
     return rows[0] ?? null;
   }
@@ -805,20 +917,35 @@ export class Queries {
     const conds = this.permitFilter(p);
     if (center)
       conds.push(
-        'p.radius_lat IS NOT NULL',
-        bbox(center.lat, center.lon, p.radius_miles, 'p.radius_lat', 'p.radius_lon'),
+        'f.radius_lat IS NOT NULL',
+        bbox(center.lat, center.lon, p.radius_miles, 'f.radius_lat', 'f.radius_lon'),
       );
     const dist = center
-      ? HAV(center.lat, center.lon, 'p.radius_lat', 'p.radius_lon')
+      ? HAV(center.lat, center.lon, 'f.radius_lat', 'f.radius_lon')
       : 'NULL::DOUBLE';
     const bm = `fts_main_permit_text.match_bm25(permit_id, ${lit(tokens.join(' '))}, fields := 'description_norm,permit_class_norm,work_class_norm', conjunctive := ${p.match === 'all' ? 1 : 0})`;
     const scored = `(SELECT permit_id, ${bm} AS score FROM permit_text)`;
-    const base = `(SELECT p.*, s.score AS bm25_score, ${dist} AS distance_miles FROM ${scored} s JOIN permits p ON p.permit_id = s.permit_id WHERE s.score IS NOT NULL AND ${conds.join(' AND ')})`;
+    // Scores, filters, the total and the page's ids come from local tables; only the page's full rows are read from
+    // permit_text_rows, by id (decisions.md section 30).
+    const base = `(SELECT f.permit_id, s.score AS bm25_score, ${dist} AS distance_miles FROM ${scored} s JOIN permit_text_filters f ON f.permit_id = s.permit_id WHERE s.score IS NOT NULL AND ${conds.join(' AND ')})`;
     const within = center ? `WHERE distance_miles <= ${p.radius_miles}` : '';
     const total = await this.scalar(`SELECT count(*) FROM ${base} ${within}`);
-    const rows = await this.all(
+    const hits = await this.all(
       `SELECT * FROM ${base} ${within} ORDER BY bm25_score DESC, permit_id ASC LIMIT ${p.limit} OFFSET ${offset}`,
     );
+    const full = new Map(
+      (hits.length
+        ? await this.all(
+            `SELECT * FROM permit_text_rows WHERE permit_id IN (${hits.map((h) => lit(h.permit_id)).join(', ')})`,
+          )
+        : []
+      ).map((r) => [r.permit_id as string, r]),
+    );
+    const rows = hits.map((h) => {
+      const r = full.get(h.permit_id);
+      if (!r) throw new Error(`permit_text_rows has no permit ${h.permit_id}`);
+      return { ...r, bm25_score: h.bm25_score, distance_miles: h.distance_miles };
+    });
     const stems =
       (
         await this.all(

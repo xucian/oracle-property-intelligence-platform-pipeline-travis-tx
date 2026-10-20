@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Queries, DEFAULT_LIMITS } from '@travis/query';
+import { Queries, DEFAULT_LIMITS, servingFromEnv } from '@travis/query';
 import type { Meta } from '@travis/contract';
 import { App, type HttpRequest } from '../app.js';
 import { createObservability } from '../observability.js';
@@ -14,11 +14,16 @@ function limitsFromEnv(): Meta['limits'] | undefined {
 }
 
 let queries: Promise<Queries> | null = null;
-/** Opened on first use and reused across warm invocations; a failed open is retried by the next request. */
+/**
+ * Opened on first use and reused across warm invocations; a failed open is retried by the next request. With
+ * SERVING_BASE set (the deployed functions), DUCKDB_PATH is the serving file and the large tables are read from the
+ * private deploy bucket (decisions.md section 30).
+ */
 export function getQueries(): Promise<Queries> {
   if (!queries) {
     const p = Queries.open({
-      dbPath: process.env.DUCKDB_PATH ?? '/opt/db/travis.duckdb',
+      dbPath: process.env.DUCKDB_PATH ?? '/opt/db/serving.duckdb',
+      serving: servingFromEnv(),
       memoryLimit: process.env.DUCKDB_MEMORY_LIMIT,
       threads: process.env.DUCKDB_THREADS ? Number(process.env.DUCKDB_THREADS) : undefined,
       tempDirectory: '/tmp',

@@ -37,27 +37,35 @@ deploy: deploy-api build-explorer deploy-web
 
 # ---- hosted layer ----------------------------------------------------------
 
-# Copy the DuckDB file into the Docker build context: `just stage-db` (data/deploy/current) or `just stage-db fixture`.
+# Export the serving set of data/deploy/current (decisions.md section 30; skipped when it is up to date).
+serving:
+    npm run serving -w @travis/deploy-build
+
+# `just stage-db` takes data/deploy/current (after `just serving`); `just stage-db fixture` the fixture DB in
+# full-file mode (synth, SAM local).
+# Copy the serving file and deploy.json into the Docker build context.
 stage-db source="current":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{ source }}" in
-      current) src="data/deploy/current/travis.duckdb" ;;
-      fixture) src="packages/query/fixtures/travis-fixture.duckdb" ;;
+      current) src="data/deploy/current/serving/serving.duckdb"; meta="data/deploy/current/deploy.json" ;;
+      fixture) src="packages/query/fixtures/travis-fixture.duckdb"; meta="" ;;
       *) echo "stage-db: source must be 'current' or 'fixture'" >&2; exit 1 ;;
     esac
     if [ ! -f "$src" ]; then
       echo "stage-db: $src does not exist." >&2
       if [ "{{ source }}" = "current" ]; then
-        echo "  Run deploy-build first so data/deploy/current points at a deploy directory." >&2
+        echo "  Run deploy-build first (data/deploy/current), then: just serving" >&2
       else
         echo "  The fixture DB is built by deploy-build (packages/query/fixtures)." >&2
       fi
       exit 1
     fi
+    rm -rf apps/api/build/db
     mkdir -p apps/api/build/db
-    cp "$src" apps/api/build/db/travis.duckdb
-    ls -l apps/api/build/db/travis.duckdb
+    cp "$src" apps/api/build/db/serving.duckdb
+    if [ -n "$meta" ]; then cp "$meta" apps/api/build/db/deploy.json; else echo '{}' > apps/api/build/db/deploy.json; fi
+    ls -l apps/api/build/db/
 
 # cdk synth --strict with no AWS calls. CI: just cdk_config=apps/api/cdk/config.example.json synth
 synth:
@@ -77,9 +85,19 @@ _need-docker:
     export PATH="/opt/homebrew/bin:$PATH"
     docker info >/dev/null 2>&1 || { echo "Docker is not running. Start it: colima start --arch aarch64 --disk 60" >&2; exit 1; }
 
-# Bundle the Lambda handlers, stage the deploy DuckDB file, then `cdk deploy TravisApi`. Operator only.
-deploy-api: _need-profile _need-docker build-api (stage-db "current")
-    export PATH="/opt/homebrew/bin:$PATH"; cd "{{ cdk_dir }}" && AWS_PROFILE="{{ profile }}" CDK_CONFIG="{{ cdk_config }}" npx cdk deploy TravisApi --outputs-file "{{ cdk_dir }}/cdk.out/TravisApi.outputs.json"
+# The upload comes first so the new image finds its files; on a first deploy (no stack yet) it follows the deploy.
+# Bundle, export and stage the serving set, upload its Parquet files to the deploy bucket, `cdk deploy TravisApi`. Operator only.
+deploy-api: _need-profile _need-docker build-api serving (stage-db "current")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="/opt/homebrew/bin:$PATH"
+    bucket() { aws cloudformation describe-stacks --stack-name TravisApi --region {{ region }} --profile "{{ profile }}" \
+      --query "Stacks[0].Outputs[?OutputKey=='DeployBucketName'].OutputValue" --output text 2>/dev/null || true; }
+    upload() { AWS_PROFILE="{{ profile }}" AWS_REGION={{ region }} npm run upload-serving -w @travis/deploy-build -- --bucket "$1"; }
+    b="$(bucket)"
+    if [ -n "$b" ] && [ "$b" != "None" ]; then upload "$b"; fi
+    (cd "{{ cdk_dir }}" && AWS_PROFILE="{{ profile }}" CDK_CONFIG="{{ cdk_config }}" npx cdk deploy TravisApi --outputs-file "{{ cdk_dir }}/cdk.out/TravisApi.outputs.json")
+    if [ -z "$b" ] || [ "$b" = "None" ]; then upload "$(bucket)"; fi
 
 [private]
 build-api:

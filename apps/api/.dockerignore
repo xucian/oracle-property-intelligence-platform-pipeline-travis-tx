@@ -3,4 +3,5 @@
 !docker/fetch-extension.mjs
 !dist/api.mjs
 !dist/chat.mjs
-!build/db/travis.duckdb
+!build/db/serving.duckdb
+!build/db/deploy.json

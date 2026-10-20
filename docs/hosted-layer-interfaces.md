@@ -34,7 +34,7 @@ Versions: DuckDB 1.5.6, `@duckdb/node-api` 1.5.6-r.1, `@duckdb/duckdb-wasm` 1.33
 ## DuckDB file
 
 - deploy-build writes `<repo>/data/deploy/<deploy_id>/travis.duckdb` and `deploy.json`, then points the symlink `<repo>/data/deploy/current` at that directory. `data/` is gitignored.
-- In the image the file is `/opt/db/travis.duckdb`, opened read-only; env `DUCKDB_PATH` overrides (tests, SAM local). `fts` ships bundled (`extension_directory` set, autoinstall off); `memory_limit`, `threads`, `temp_directory=/tmp` set explicitly.
+- The functions read the file's serving set (decisions.md section 30), written by `deploy-build serving` to `data/deploy/<deploy_id>/serving/` and recorded in `deploy.json`'s `serving` block: six Parquet files uploaded to the private deploy bucket under `serving/<deploy_id>/`, and `serving.duckdb` (the small tables, `permit_text` with its text index, `permit_text_filters`, `serving_files`), which the image carries at `/opt/db/serving.duckdb` with `deploy.json`. Env `DUCKDB_PATH` overrides; without `SERVING_BASE` the path is opened in full-file mode (tests, SAM local with the fixture). `fts` and `httpfs` ship bundled (`extension_directory` set, autoinstall off); `memory_limit`, `threads`, `temp_directory=/tmp` set explicitly.
 - Schema: `packages/query/schema.sql` then `post_load.sql`, documented column by column in `packages/query/SCHEMA.md`. Readers must use only documented columns.
 - `deploy.json`: `{deploy_id, inputs_sha256, deployed_at, server_commit, duckdb_version, duckdb_sha256, run_id, manifest_cid, bytes}`.
 
@@ -51,15 +51,16 @@ Tests that need it use `describe.skipIf(!fixtureExists())` from `@travis/query` 
 
 ## Deployment surfaces
 
-`TravisApi` (both functions from one arm64 container image with the DuckDB file baked in, the HTTP API, alarms, deploy bucket) and `TravisWeb` (CloudFront, explorer and mirror buckets), each pinned to `us-east-2`, fixed construct IDs.
-Order: deploy-build, `cdk deploy TravisApi`, explorer build with `VITE_API_URL` (the HTTP API `$default` URL), `cdk deploy TravisWeb`, then the T7 and T8 checks. Deploys are run by the operator, never from CI.
+`TravisApi` (both functions from one arm64 container image with the serving file baked in, the HTTP API, alarms, the deploy bucket holding the serving Parquet files) and `TravisWeb` (CloudFront, explorer and mirror buckets), each pinned to `us-east-2`, fixed construct IDs.
+Order: deploy-build, `just deploy-api` (serving export and upload, then `cdk deploy TravisApi`), explorer build with `VITE_API_URL` (the HTTP API `$default` URL), `cdk deploy TravisWeb`, then the T7 and T8 checks. Deploys are run by the operator, never from CI.
 
 ## Function environment (set by the CDK stack, read by the handlers)
 
 | Variable | Function | Value |
 | --- | --- | --- |
-| `DUCKDB_PATH` | both | `/opt/db/travis.duckdb` |
-| `DUCKDB_EXTENSION_DIR` | both | `/opt/duckdb_extensions` (bundled `fts`, autoinstall and autoload off) |
+| `DUCKDB_PATH` | both | `/opt/db/serving.duckdb` |
+| `SERVING_BASE` | both | `s3://<deploy bucket>/serving`; the Parquet files are read at `<base>/<deploy_id>/<file>` with the role's credentials |
+| `DUCKDB_EXTENSION_DIR` | both | `/opt/duckdb_extensions` (bundled `fts` and `httpfs`, autoinstall and autoload off) |
 | `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS` | both | from the CDK config, sized from the T7 measurements |
 | `LIMITS_JSON` | both | `{stage, routes, mcp, chat}` from the CDK config, served in `/v1/meta.limits` |
 | `POWERTOOLS_SERVICE_NAME` | both | `travis-api` / `travis-chat` |

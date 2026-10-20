@@ -111,10 +111,16 @@ describe('TravisApi stack', () => {
     api.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
         Variables: Match.objectLike({
-          DUCKDB_PATH: '/opt/db/travis.duckdb',
+          DUCKDB_PATH: '/opt/db/serving.duckdb',
+          SERVING_BASE: {
+            'Fn::Join': [
+              '',
+              ['s3://', { Ref: Match.stringLikeRegexp('^DeployBucket') }, '/serving'],
+            ],
+          },
           DUCKDB_EXTENSION_DIR: '/opt/duckdb_extensions',
           DUCKDB_MEMORY_LIMIT: '2GB',
-          DUCKDB_THREADS: '2',
+          DUCKDB_THREADS: '4',
           POWERTOOLS_SERVICE_NAME: 'travis-api',
           POWERTOOLS_METRICS_NAMESPACE: 'TravisPropertyIntelligence',
           LIMITS_JSON: Match.stringLikeRegexp('agent/chat'),
@@ -132,13 +138,25 @@ describe('TravisApi stack', () => {
   });
 
   describe('IAM', () => {
-    it('api function: logs and X-Ray only', () => {
+    /** decisions.md section 30: s3:GetObject on the deploy bucket's serving/ prefix, nothing else in S3. */
+    const expectServingGrantOnly = (s: ReturnType<typeof statementsFor>) => {
+      const s3 = s.filter((x) => x.actions.some((a) => a.startsWith('s3:')));
+      expect(s3).toHaveLength(1);
+      expect(s3[0]!.actions).toEqual(['s3:GetObject']);
+      expect(s3[0]!.resources).toHaveLength(1);
+      const r = JSON.stringify(s3[0]!.resources);
+      expect(r).toContain('DeployBucket');
+      expect(r).toContain('/serving/*');
+    };
+
+    it('api function: logs, X-Ray and the serving set only', () => {
       const s = statementsFor(api, 'ApiFunction');
       const actions = allActions(s);
       expect(actions.sort()).toEqual(
         expect.arrayContaining(['xray:PutTraceSegments', 'xray:PutTelemetryRecords']),
       );
-      for (const a of actions) expect(a).toMatch(/^(xray|ecr|logs):/);
+      for (const a of actions) expect(a).toMatch(/^(xray|ecr|logs|s3):/);
+      expectServingGrantOnly(s);
       const role = Object.values(api.findResources('AWS::IAM::Role')).find((r) =>
         JSON.stringify((r as Json).Properties.ManagedPolicyArns ?? '').includes(
           'AWSLambdaBasicExecutionRole',
@@ -146,13 +164,14 @@ describe('TravisApi stack', () => {
       );
       expect(role).toBeDefined();
       const flat = JSON.stringify(s);
-      for (const denied of ['bedrock', 's3:', 'ssm:', 'aws-marketplace', 'secretsmanager']) {
+      for (const denied of ['bedrock', 'ssm:', 'aws-marketplace', 'secretsmanager']) {
         expect(flat).not.toContain(denied);
       }
     });
 
-    it('chat function: Bedrock invoke on the profile and foundation-model ARNs, ssm:GetParameter on the flag', () => {
+    it('chat function: Bedrock invoke on the profile and foundation-model ARNs, ssm:GetParameter on the flag, the serving set', () => {
       const s = statementsFor(api, 'ChatFunction');
+      expectServingGrantOnly(s);
       const bedrock = s.find((x) => x.actions.some((a) => a.startsWith('bedrock:')))!;
       expect(bedrock.actions.sort()).toEqual([
         'bedrock:InvokeModel',
@@ -168,7 +187,7 @@ describe('TravisApi stack', () => {
       expect(ssm.actions).toEqual(['ssm:GetParameter']);
       expect(JSON.stringify(ssm.resources)).toContain('ChatBudgetFlag');
       const flat = JSON.stringify(s);
-      for (const denied of ['s3:', 'aws-marketplace', 'ssm:PutParameter', 'secretsmanager']) {
+      for (const denied of ['aws-marketplace', 'ssm:PutParameter', 'secretsmanager']) {
         expect(flat).not.toContain(denied);
       }
     });

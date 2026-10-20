@@ -13,7 +13,9 @@
     "test": "vitest run --root . --config ../../vitest.config.ts --passWithNoTests",
     "build-db": "tsx src/cli.ts build-db",
     "mirror": "tsx src/cli.ts mirror",
-    "stage-inputs": "tsx src/cli.ts stage-inputs"
+    "stage-inputs": "tsx src/cli.ts stage-inputs",
+    "serving": "tsx src/cli.ts serving",
+    "upload-serving": "tsx src/cli.ts upload-serving"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

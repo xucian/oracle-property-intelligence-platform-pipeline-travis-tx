@@ -50,7 +50,7 @@ export const METRICS_NAMESPACE = 'TravisPropertyIntelligence';
 
 export interface TravisApiProps extends StackProps {
   config: TravisConfig;
-  /** Docker build context holding Dockerfile, dist/*.mjs and build/db/travis.duckdb (apps/api by default). */
+  /** Docker build context holding Dockerfile, dist/*.mjs and build/db/ (serving file and deploy.json; apps/api by default). */
   imageDirectory: string;
 }
 
@@ -97,8 +97,11 @@ export class TravisApi extends Stack {
       platform: Platform.LINUX_ARM64,
     });
 
+    // decisions.md section 30: the image carries the serving file; the large tables are Parquet under serving/ in the
+    // deploy bucket, read through httpfs with the function role's credentials
     const sharedEnv = {
-      DUCKDB_PATH: '/opt/db/travis.duckdb',
+      DUCKDB_PATH: '/opt/db/serving.duckdb',
+      SERVING_BASE: `s3://${deployBucket.bucketName}/serving`,
       DUCKDB_EXTENSION_DIR: '/opt/duckdb_extensions',
       DUCKDB_MEMORY_LIMIT: config.duckdb.memoryLimit,
       DUCKDB_THREADS: String(config.duckdb.threads),
@@ -147,6 +150,17 @@ export class TravisApi extends Stack {
         BEDROCK_MODEL_ID: config.bedrockModelId,
       },
     });
+
+    // --- Both functions read the serving set and nothing else in the bucket (no ListBucket: names are exact) ---
+    for (const fn of [apiFn, chatFn])
+      fn.addToRolePolicy(
+        new PolicyStatement({
+          sid: 'ReadServingSet',
+          effect: Effect.ALLOW,
+          actions: ['s3:GetObject'],
+          resources: [deployBucket.arnForObjects('serving/*')],
+        }),
+      );
 
     // --- Kill switch flag and IAM for chat (the only Bedrock grant) ---
     const flag = new StringParameter(this, 'ChatBudgetFlag', {
