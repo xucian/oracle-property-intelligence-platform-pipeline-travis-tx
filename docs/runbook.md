@@ -688,7 +688,7 @@ just build-explorer deploy-web
 `cdk deploy TravisApi` asks to approve the IAM changes (the chat role's Bedrock grant moves to the Sonnet 4.6 profile and
 its three foundation models; `secretsmanager:GetSecretValue` on the one secret) and adds the alarm
 `travis-chat-daily-tokens`, reserved concurrency 5 and the chat route throttle 0.4 a second, burst 5. `deploy-api` ends with
-`just warm`, which now also warms two chat instances (no model call). Run `just warm` again before a live demo. Then:
+`just warm`, which now also warms two chat instances (no model call). Run `just warm` again before a live demo. Done 2026-10-20 and verified (decisions.md section 32, "Live"); later code-only deploys need no approval. Then:
 
 ### Check 1: the golden set against the live API
 

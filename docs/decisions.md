@@ -2184,3 +2184,17 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   16.8 s (the four-step contractor-identity turn), README turns 8.8 s and 10.7 s, state-suffix turns 7.5 s and 9.4 s,
   $0.024 a turn. No Opus rerun. SAM local ran on the image built before this fix pass; the AWS replay validates the final
   image.
+- **Live (2026-10-20; the operator's approval after the runbook section 10 checks).** Deployed 17:44Z with the IAM changes
+  approved. Live golden set (`fixtures/rag/results/20261020T174636Z-live-claude-sonnet-4-6-live.json`, 23 cases, 25
+  turns): hard gates 25/25 and 25/25, outcome accuracy 1.000, parameter accuracy 0.96 (`out-of-county-dallas` declined
+  without the `resolve_search_center` call the fixture expects; outcome right, no rows), p50 6.9 s, p95 10.9 s, max
+  12.0 s, README turns 6.6 s and 10.9 s, state-suffix turns 7.2 s and 8.7 s, no deadline hit, no non-200. Cold probe:
+  five concurrent README first turns, three on fresh unprimed instances (init 0.6-1.0 s), 9.9 s, 10.3 s and 12.3 s end to
+  end against the 25 s deadline; a warm instance 7.9 s; the model's time (5.4-7.8 s) dominates. Two live fixes, both deployed
+  by the operator (the first before checks 2 and 3, the second after the approval): (1) the HTTP API's `$default` route catches CORS preflights too, so they reached the API function and
+  got `405`, and the browser blocked the Agent tab's POST (the explorer's first preflighted request); the app now answers
+  `OPTIONS` with `204` before it opens anything, and API Gateway adds the configured CORS headers (`821fe94`). (2) The
+  server's search-center assumption states both counts ("129,473 parcels; centroid of 124,832 … (those with
+  coordinates)"), since the model quotes `parcel_count` beside the basis's coordinate count (`5956f22`). The Agent tab
+  answered both README prompts; LangSmith thread `5y4r0251415l0l2a4p0v0q65` holds both turns with their model and tool
+  child runs and no error; the `chat turn` log line carries ids, hashes, tokens and timings only.
