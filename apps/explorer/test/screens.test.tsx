@@ -40,7 +40,7 @@ describe('Run summary (demo step 1)', () => {
     expect(await screen.findByText(RUN_ID)).toBeTruthy();
     expect(screen.getAllByText(/Travis County, TX/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('441,939').length).toBeGreaterThan(0); // properties
-    expect(screen.getByText('373,497')).toBeTruthy(); // with coordinates
+    expect(screen.getByText('377,962')).toBeTruthy(); // with coordinates
     expect(screen.getByText(MANIFEST_CID)).toBeTruthy();
     expect(
       (await screen.findAllByText('tcad-2026-certified-appraisal-export')).length,

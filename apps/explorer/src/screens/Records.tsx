@@ -119,8 +119,13 @@ export function Records() {
               <div key={p.permit_id}>
                 <PermitCard permit={p} />
                 <p className="muted">
-                  Contractor attribution <code>{p.contractor.contractor_attribution_key}</code> ·{' '}
-                  <BbbBadge bbb={p.bbb} />
+                  Contractor attribution{' '}
+                  {p.contractor ? (
+                    <code>{p.contractor.contractor_attribution_key}</code>
+                  ) : (
+                    'none printed'
+                  )}{' '}
+                  · <BbbBadge bbb={p.bbb} />
                 </p>
               </div>
             ))}

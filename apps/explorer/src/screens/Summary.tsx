@@ -76,9 +76,13 @@ export function Summary() {
               {run.sources.map((s) => (
                 <tr key={`${s.dataset}-${s.fetched_at}`}>
                   <td>
-                    <a href={s.url} rel="noreferrer">
-                      {s.dataset}
-                    </a>
+                    {s.url ? (
+                      <a href={s.url} rel="noreferrer">
+                        {s.dataset}
+                      </a>
+                    ) : (
+                      s.dataset
+                    )}
                   </td>
                   <td>{s.watermark ?? 'n/a'}</td>
                   <td>{fmtTime(s.fetched_at)}</td>

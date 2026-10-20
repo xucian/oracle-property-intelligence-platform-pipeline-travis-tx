@@ -81,14 +81,21 @@ export function PermitCard({ permit: p }: { permit: PermitSummary }) {
         {p.open_since ? ` since ${p.open_since.slice(0, 10)} (${p.open_since_basis})` : ''}
       </p>
       <p>
-        Contractor <strong>{p.contractor.company_name ?? p.contractor.printed_name}</strong>
-        {p.contractor.company_name ? (
+        {p.contractor ? (
           <>
-            {' '}
-            (printed contact <span>{p.contractor.printed_name}</span>)
+            Contractor <strong>{p.contractor.company_name ?? p.contractor.printed_name}</strong>
+            {p.contractor.company_name ? (
+              <>
+                {' '}
+                (printed contact <span>{p.contractor.printed_name}</span>)
+              </>
+            ) : null}{' '}
+            · {p.contractor.identity_status}
           </>
-        ) : null}{' '}
-        · {p.contractor.identity_status} · <BbbBadge bbb={p.bbb} />
+        ) : (
+          <>No contractor printed on the permit</>
+        )}{' '}
+        · <BbbBadge bbb={p.bbb} />
       </p>
       {p.match_snippet ? <p className="muted">…{p.match_snippet.text}…</p> : null}
       <Provenance source={p.source} recordCid={p.record_cid} />
