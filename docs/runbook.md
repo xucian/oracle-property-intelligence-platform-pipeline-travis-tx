@@ -616,7 +616,7 @@ lines equal; the MCP answer has `structuredContent` with two properties and no `
 ### Check 2: throttle, alarm, kill switch and the log trace
 
 ```zsh
-for i in 1 2 3 4 5 6 7 8; do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; done; echo
+for i in 1 2 3 4 5 6 7 8; do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}' & done; wait; echo
 aws cloudwatch set-alarm-state --region us-east-2 --alarm-name travis-chat-daily-usage --state-value ALARM --state-reason 'T7 check'
 sleep 90
 curl -s -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; echo
@@ -626,7 +626,7 @@ sleep 60
 for g in AccessLogGroupName ApiLogGroupName; do aws logs filter-log-events --region us-east-2 --log-group-name "$(out $g)" --filter-pattern "\"$RID\"" --query 'length(events)'; done
 ```
 
-Pass: at least one `429` among the eight codes; an alarm email for `travis-chat-daily-usage` arrives; the chat answer
+Pass: at least one `429` among the eight codes (sent at once: sent one after another from a distant client, they arrive about 1.6 per second, which the 1-per-second rate with a burst of 3 absorbs); an alarm email for `travis-chat-daily-usage` arrives; the chat answer
 after the pause says `"reason":"budget_exhausted"`; both log counts are at least 1.
 
 ### Check 3: the explorer on the live URL
