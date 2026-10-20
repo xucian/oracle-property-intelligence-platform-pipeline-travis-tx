@@ -4041,7 +4041,14 @@
             ]
           },
           "contractor": {
-            "$ref": "#/components/schemas/PermitContractor"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitContractor"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bbb": {
             "$ref": "#/components/schemas/Bbb"
@@ -4340,7 +4347,14 @@
             ]
           },
           "contractor": {
-            "$ref": "#/components/schemas/PermitContractor"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermitContractor"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bbb": {
             "$ref": "#/components/schemas/Bbb"

@@ -45,10 +45,12 @@ const num = (v: unknown): number | null => {
 };
 
 /** `travis-attribution-key.v1`: first 32 hex of SHA-256 of trim(company) U+001F trim(phone); company falls back to the full name. */
-export function attributionKey(row: Record<string, string>): string {
+export function attributionKey(row: Record<string, string>): string | null {
   const company =
     (row.contractor_company_name ?? '').trim() || (row.contractor_full_name ?? '').trim();
   const phone = (row.contractor_phone ?? '').trim();
+  // a permit that prints no company, no full name and no phone has no attribution (ruling: never a shared blank key)
+  if (company === '' && phone === '') return null;
   return createHash('sha256').update(`${company}\u001f${phone}`, 'utf8').digest('hex').slice(0, 32);
 }
 

@@ -243,6 +243,10 @@ export async function loadMeta(
       // extra keys (not part of /v1/meta.counts): the T5 reconciliation inputs
       set.set('captured_permits', total);
       set.set('permits_out_of_county', outOfCounty);
+      set.set(
+        'permits_without_contractor',
+        await cnt('SELECT count(*) FROM permits WHERE contractor_attribution_key IS NULL'),
+      );
       set.set('permits_published', await cnt('SELECT count(*) FROM permits'));
       set.set('parcels_with_permits', await cnt('SELECT count(DISTINCT property_id) FROM permits'));
       set.set('seed_rows', ctx.seedRows);
@@ -302,6 +306,18 @@ export async function loadMeta(
         ? unm.map((u) => `${u.kind} "${u.value}" (${u.n})`).join('; ')
         : 'none';
       let seq = lims.length;
+      const noContractor = set.get('permits_without_contractor') ?? 0;
+      lims.push({
+        seq: ++seq,
+        scope: 'deploy',
+        source: 'austin-issued-construction-permits/3syk-w9eu',
+        availability: 'supported_partial',
+        source_access_status: 'available',
+        incomplete_reason: 'no_contractor_printed',
+        detail: `${noContractor.toLocaleString('en-US')} published permits print no company name, no full name and no phone: they carry no contractor attribution (contractor is null)`,
+        evidence: 'meta_counts.permits_without_contractor',
+        records_request: null,
+      });
       lims.push({
         seq: ++seq,
         scope: 'deploy',

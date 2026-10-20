@@ -49,7 +49,7 @@ export interface VerifiedInputs {
   inputsSha256: string;
 }
 
-const readJson = <T = any>(f: string): T => JSON.parse(readFileSync(f, 'utf8')) as T;  
+const readJson = <T = any>(f: string): T => JSON.parse(readFileSync(f, 'utf8')) as T;
 
 export class VerificationError extends Error {}
 
@@ -329,7 +329,6 @@ export async function verifyInputs(
   for (const track of ['registry', 'licensing'] as const) {
     const wm = readJson(path.join(KIT_DATA, track, 'watermark.json'));
     for (const [name, e] of Object.entries<any>(wm.entries)) {
-       
       const parquet = path.join(KIT_DATA, track, `${name}.parquet`);
       const h = await cache.sha256(parquet);
       if (h !== e.snapshot.sha256)

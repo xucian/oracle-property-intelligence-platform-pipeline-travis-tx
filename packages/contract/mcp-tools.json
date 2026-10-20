@@ -1339,7 +1339,14 @@
               ]
             },
             "contractor": {
-              "$ref": "#/$defs/PermitContractor"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PermitContractor"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "bbb": {
               "$ref": "#/$defs/Bbb"
@@ -2086,7 +2093,14 @@
               ]
             },
             "contractor": {
-              "$ref": "#/$defs/PermitContractor"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PermitContractor"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "bbb": {
               "$ref": "#/$defs/Bbb"
@@ -2721,7 +2735,14 @@
               ]
             },
             "contractor": {
-              "$ref": "#/$defs/PermitContractor"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PermitContractor"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "bbb": {
               "$ref": "#/$defs/Bbb"
@@ -3136,7 +3157,14 @@
           ]
         },
         "contractor": {
-          "$ref": "#/$defs/PermitContractor"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermitContractor"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "bbb": {
           "$ref": "#/$defs/Bbb"

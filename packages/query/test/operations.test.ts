@@ -389,6 +389,36 @@ describe.skipIf(!fixtureExists())('operations on the fixture database', () => {
     expect(types.getRowObjectsJson().length).toBeGreaterThan(1);
   });
 
+  it('a permit that prints no contractor has no attribution key and a null contractor', async () => {
+    const r = (
+      await q.conn.runAndReadAll(
+        `SELECT permit_id FROM permits WHERE contractor_attribution_key IS NULL LIMIT 1`,
+      )
+    ).getRowObjectsJson() as { permit_id: string }[];
+    expect(r.length).toBe(1);
+    const p = expectValid(
+      PermitDetail,
+      await q.getPermit(r[0]!.permit_id),
+      'permit without contractor',
+    );
+    expect(p.contractor).toBeNull();
+    const none = (
+      await q.conn.runAndReadAll(
+        `SELECT count(*) AS n FROM contractors WHERE contractor_attribution_key IS NULL OR company_name IS NULL AND phone IS NULL AND printed_names = []`,
+      )
+    ).getRowObjectsJson() as { n: string }[];
+    expect(Number(none[0]!.n)).toBe(0);
+  });
+
+  it('the veteran-owned taxid is not served', async () => {
+    const r = (
+      await q.conn.runAndReadAll(
+        `SELECT count(*) AS n FROM business_records WHERE printed LIKE '%"taxid"%'`,
+      )
+    ).getRowObjectsJson() as { n: string }[];
+    expect(Number(r[0]!.n)).toBe(0);
+  });
+
   it('privacy: no sole-owner taxpayer number and no personal license contact fields anywhere', async () => {
     const v = await q.conn.runAndReadAll('SELECT count(*) AS n FROM v_privacy_violations');
     expect(Number((v.getRowObjectsJson()[0] as { n: string }).n)).toBe(0);

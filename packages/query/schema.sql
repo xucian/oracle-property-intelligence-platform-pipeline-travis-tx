@@ -304,7 +304,7 @@ CREATE TABLE permits (
   contractor_address2     VARCHAR,
   contractor_city         VARCHAR,
   contractor_zip          VARCHAR,
-  contractor_attribution_key VARCHAR NOT NULL,         -- -> contractors
+  contractor_attribution_key VARCHAR,                  -- -> contractors; NULL when the permit prints no company, full name or phone
   -- profile classification (kit worktree; cross-check permits-internal.jsonl)
   roof_work_class    VARCHAR NOT NULL CHECK (roof_work_class IN ('primary_roof_replacement','primary_roof_new_construction','repair_or_coating','accessory_roof','other','needs_review')),
   work_classifier_version VARCHAR NOT NULL,

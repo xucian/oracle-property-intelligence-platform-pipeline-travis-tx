@@ -681,14 +681,17 @@ export class Queries {
         open_duration_as_of: asOf,
         days_since_expiry:
           r.status_group === 'stalled' && r.expires_date ? days(r.expires_date) : null,
-        contractor: {
-          contractor_attribution_key: r.contractor_attribution_key,
-          identity_status: 'source_name_attribution',
-          printed_name: r.contractor_full_name ?? '',
-          company_name: r.contractor_company_name ?? null,
-          trade: r.contractor_trade ?? null,
-          phone: r.contractor_phone ?? null,
-        },
+        contractor:
+          r.contractor_attribution_key === null || r.contractor_attribution_key === undefined
+            ? null
+            : {
+                contractor_attribution_key: r.contractor_attribution_key,
+                identity_status: 'source_name_attribution',
+                printed_name: r.contractor_full_name ?? '',
+                company_name: r.contractor_company_name ?? null,
+                trade: r.contractor_trade ?? null,
+                phone: r.contractor_phone ?? null,
+              },
         bbb,
         lat: r.lat ?? null,
         lon: r.lon ?? null,

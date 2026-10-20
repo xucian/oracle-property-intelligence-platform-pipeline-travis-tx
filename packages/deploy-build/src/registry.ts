@@ -50,7 +50,7 @@ export async function loadRegistry(
   // ---- contractors --------------------------------------------------------------------------------------------------
   const top = (name: string, expr: string) =>
     db.run(`CREATE TEMP TABLE c_${name} AS SELECT k, v FROM (
-      SELECT contractor_attribution_key AS k, ${expr} AS v, count(*) AS c FROM permits WHERE ${expr} IS NOT NULL GROUP BY 1, 2)
+      SELECT contractor_attribution_key AS k, ${expr} AS v, count(*) AS c FROM permits WHERE ${expr} IS NOT NULL AND contractor_attribution_key IS NOT NULL GROUP BY 1, 2)
       QUALIFY row_number() OVER (PARTITION BY k ORDER BY c DESC, v) = 1`);
   await top('company', 'contractor_company_name');
   await top('trade', 'contractor_trade');
@@ -64,10 +64,10 @@ export async function loadRegistry(
       'blocked', NULL, 'http_403_source_block', NULL
     FROM (SELECT contractor_attribution_key AS k, count(*)::INTEGER n, count(*) FILTER (status_group = 'open')::INTEGER open_n,
             count(*) FILTER (is_roofing)::INTEGER roof_n, count(*) FILTER (status_group = 'needs_review')::INTEGER nr_n
-          FROM permits GROUP BY 1) p
+          FROM permits WHERE contractor_attribution_key IS NOT NULL GROUP BY 1) p
     LEFT JOIN c_company co ON co.k = p.k LEFT JOIN c_trade tr ON tr.k = p.k LEFT JOIN c_phone ph ON ph.k = p.k LEFT JOIN c_address ad ON ad.k = p.k
     LEFT JOIN (SELECT contractor_attribution_key AS k, list(DISTINCT contractor_full_name ORDER BY contractor_full_name) AS names
-               FROM permits WHERE contractor_full_name IS NOT NULL GROUP BY 1) nm ON nm.k = p.k`);
+               FROM permits WHERE contractor_full_name IS NOT NULL AND contractor_attribution_key IS NOT NULL GROUP BY 1) nm ON nm.k = p.k`);
   await db.run(
     `UPDATE contractors SET bbb_note = ${q('BBB returns a bot challenge and 403 to scripted access; ratings ship as null, status blocked, until approved API access (decisions.md section 4)')}`,
   );
@@ -75,7 +75,7 @@ export async function loadRegistry(
   // ---- contractor names normalized by the kit matcher ---------------------------------------------------------------------
   const names = await db.rows<{ k: string; field: string; printed: string }>(
     `SELECT k, 'company_name' AS field, v AS printed FROM c_company
-     UNION ALL SELECT contractor_attribution_key, 'printed_name', contractor_full_name FROM permits WHERE contractor_full_name IS NOT NULL GROUP BY 1, 3`,
+     UNION ALL SELECT contractor_attribution_key, 'printed_name', contractor_full_name FROM permits WHERE contractor_full_name IS NOT NULL AND contractor_attribution_key IS NOT NULL GROUP BY 1, 3`,
   );
   const cn = names
     .map((n) => ({ ...n, norm: normalizeName(n.printed) }))
@@ -164,7 +164,7 @@ export async function loadRegistry(
     SELECT ${recId(VO, 'v.filing_number__trimmed')}, ${q(VO)}, ${q('tx-sos-veteran-owned-business/2vfr-72e4')}, v.filing_number__trimmed, NULL, NULL,
       v.name__trimmed, v.filing_number__trimmed, v.corp_type__trimmed, v.status_description__trimmed, v.inactive_date__trimmed, NULL, NULL,
       v.entity_address1__trimmed, v.entity_address2__trimmed, v.entity_city__trimmed, v.entity_state__trimmed, v.entity_zip_code__trimmed, 'mailing', NULL,
-      CASE WHEN j.match = 'travis' THEN 'travis' ELSE 'out_of_county' END, NULL, ${printedExpr(voCols).replace(/(\w+)__trimmed/g, 'v.$1__trimmed')},
+      CASE WHEN j.match = 'travis' THEN 'travis' ELSE 'out_of_county' END, NULL, ${printedExpr(voCols, ['taxid']).replace(/(\w+)__trimmed/g, 'v.$1__trimmed')},
       v._capture_url, v._capture_fetched_at, ${reqJson('v._capture_url')}, v._row_sha256, 'confirmed_present',
       ['record_id','name','sos_file_number','organization_type','status_code','status_date','address'], v.filing_number__trimmed
     FROM read_parquet(${q(voFile)}) v LEFT JOIN read_parquet(${q(joinFile)}) j ON j.veteran_row_sha256 = v._row_sha256

@@ -163,7 +163,7 @@ export const PermitSummary = def(
     open_duration_basis: OpenDurationBasis.nullable(),
     open_duration_as_of: z.string(),
     days_since_expiry: nint,
-    contractor: PermitContractor,
+    contractor: PermitContractor.nullable(),
     bbb: Bbb,
     lat: nnum,
     lon: nnum,

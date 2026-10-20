@@ -15,7 +15,7 @@ export interface SchemaLike {
     success: boolean;
     data?: any;
     error?: { issues: { path: PropertyKey[]; message: string }[] };
-  };  
+  };
 }
 export function expectValid<T extends SchemaLike>(
   schema: T,
@@ -53,7 +53,7 @@ export interface Samples {
 
 export async function samples(q: Queries): Promise<Samples> {
   const one = async (sql: string): Promise<Record<string, any>> =>
-    (await q.conn.runAndReadAll(sql)).getRowObjectsJson()[0] as Record<string, any>;  
+    (await q.conn.runAndReadAll(sql)).getRowObjectsJson()[0] as Record<string, any>;
   const c = await one(`SELECT lat, lon FROM search_centers WHERE center_id = 'city:austin'`);
   const p = await one(
     `SELECT property_id, geo_id FROM properties WHERE geo_id IS NOT NULL AND roof_age_years > 15 AND lat IS NOT NULL ORDER BY property_id LIMIT 1`,
