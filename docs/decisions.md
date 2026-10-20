@@ -2131,10 +2131,12 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   read, in parallel. `just warm` now also sends `c` (default 2) warm-ups to the chat function: each opens an instance, reads
   the secret and runs the README turns' tool calls once (`AGENT_PRIME`: Austin, 5 miles, roofs over 15 years; open roofing
   permits open 5 years or more), with no model call.
-- **Explorer prewarm.** The Agent tab sends `POST /v1/agent/chat` with `{"messages": []}` once when it opens: the contract
-  answers it `400`, and the handler opens and primes the instance (as `just warm` does, once per instance, bounded by the
-  turn deadline) before it answers. Cost: one request of the chat route's burst of 5 per page load, no Bedrock call, a few
-  seconds of Lambda on a cold instance and milliseconds on a warm one.
+- **Explorer prewarm.** The Agent tab sends `POST /v1/agent/chat` with `{"messages": []}` when it opens, at most once per
+  5 minutes per browser session (a `sessionStorage` timestamp): the contract answers it `400`, and the handler opens and
+  primes the instance (as `just warm` does, once per instance, bounded by the turn deadline) before it answers. Cost: one
+  request of the chat route's burst of 5, no Bedrock call, a few seconds of Lambda on a cold instance and milliseconds on a
+  warm one. Each prewarm and each `just warm` chat warm-up is a chat-function invocation, so it counts toward the
+  200-a-day invocation limit (`travis-chat-daily-usage`) that sets the kill switch.
 - **Deviations from sections 20 and 21, recorded.** (1) A property is cited either from a property record or from a permit
   record that names it (the permit's evidence item carries its `property_id`), so a permit list can say which properties
   it is on. (2) The search-center rule is enforced, not only prompted: a search around a center that came back only as a
@@ -2148,3 +2150,37 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   numbers and flags as given and hash free-text parameters (`q`, `number`, `license_number`).
 - **Cost.** Per turn about $0.02 (Sonnet 4.6), $0.03-0.04 for a README turn; the worst day at the kill-switch limits
   (200 turns) about $5-8 of Bedrock. Standing: the secret, $0.40 a month.
+- **Fix pass after the alakazam review** ([`reviews/2026-10-20-alakazam-t9-agent-review.md`](./reviews/2026-10-20-alakazam-t9-agent-review.md),
+  one blocker and four should-fix, all applied the same day; contract unchanged, `openapi.json` still `7d8ece68…`).
+  (B1) The citation check runs over the model's assumption lines with the answer, and every `tool_error` carries no model
+  text: no answer and no model assumptions (the server's assumptions and limitations stay). (S1) Ids written outside
+  `[[…]]` are checked against this turn's evidence too: bare permit ids, 32-hex contractor keys and business or license
+  record ids, "property <id>" mentions, and the ids in API paths of link targets; any other fails closed. (S2) The server
+  removes HTML (tags, comments, autolinks) and Markdown images from the answer and the assumptions before the check and
+  keeps links only to the API's own host, the two gateways and the explorer's `#/` routes (a link elsewhere keeps its text,
+  a bare URL elsewhere goes): the CRM renders this text too. (S3) The flag read, the tracing facade and the data open run
+  inside the deadline and the `try`, each bounded (1.5 s for the flag and the facade; the open by the deadline); the SSM and
+  Secrets Manager clients have 1 s request and connection timeouts and two attempts; a failed flag read keeps the cached
+  value or counts as not set, a failed secret read turns tracing off for that instance and never fails the turn; a turn
+  that ends before reporting to the circuit breaker releases its half-open probe, so the instance cannot stay at
+  `503 circuit_open`; a missing or stale `timeEpoch` (a hand-made event) counts as now. (S4) Every earlier message of the
+  client-sent history reaches LangSmith only as `[earlier message sha256:…]`, with the same per-turn person-value
+  redaction as before. Also from the review's notes: a test parses a turn body with the frozen `ChatResponse` schema, the
+  golden runner's own gate checks what B1 and S1 check, and result files record `prompt_version`. The review's other note,
+  alarming on `ChatTurns` instead of invocations, is not applied: the operator decides whether prewarms and warm-ups
+  should stay inside the daily limit.
+- **State suffix (coordinator, 2026-10-20, checked on the live API).** `/v1/search-centers` finds nothing for
+  "Pflugerville, TX", matches "Austin, TX" exactly to a 1-parcel `AUSTIN TX` and "Austin Texas" only as an alias, so a
+  reviewer who adds the state would get a question or no match. The agent's `resolve_search_center` wrapper (not the shared
+  REST and MCP lookup, whose matching is contract) drops a trailing ", TX", " TX", ", Texas" or " Texas" in any case before
+  the lookup and adds the server assumption `State suffix dropped from the place name: "Pflugerville, TX" → "Pflugerville"`.
+  Alias-only matches such as "ATX" still get a question, as the contract requires. Two golden cases were added.
+- **Golden set after the fix pass.** 24 cases, 26 turns. For the README conversation and the two state-suffix cases the
+  expected ids are now independent SQL written from the contract's definitions over the serving set's own Parquet files
+  (`data/deploy/current/serving`), not the query functions the tools call; all four turns equal the query layer's ids and
+  totals (50,260; 139; 27,819; 50,260). The other cases keep their query-layer ids. One run on Sonnet 4.6 only
+  (`fixtures/rag/results/20261020T173105Z-local-claude-sonnet-4-6-run3-review-fixes.json`): hard gates 26/26 and 26/26,
+  outcome accuracy 1.000, parameter accuracy 1.000, id recall 1.000, text P@k 0.49 / R@k 0.75, p50 8.8 s, p95 14.3 s, max
+  16.8 s (the four-step contractor-identity turn), README turns 8.8 s and 10.7 s, state-suffix turns 7.5 s and 9.4 s,
+  $0.024 a turn. No Opus rerun. SAM local ran on the image built before this fix pass; the AWS replay validates the final
+  image.

@@ -673,9 +673,10 @@ Disable termination protection on both stacks, then `npx --prefix apps/api/cdk c
 ## 10. T9 — the agent (`POST /v1/agent/chat`)
 
 Built on 2026-10-20 (decisions.md section 32): the Bedrock agent on Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`), the
-golden set (`fixtures/rag/queries`, 22 cases; results in `fixtures/rag/results`), LangSmith tracing to the project
-`staraptor-agent`, and the explorer's Agent tab. Local results before deploy: the golden set passed both hard gates on
-24 of 24 turns with outcome accuracy 1.000, p95 12.6 s, README turns 7.3 s and 10.0 s; `just sam-local` passed 4 of 4.
+golden set (`fixtures/rag/queries`, 24 cases; results in `fixtures/rag/results`), LangSmith tracing to the project
+`staraptor-agent`, and the explorer's Agent tab, with the alakazam review's fixes applied. Local results before deploy
+(Sonnet 4.6, run 3): both hard gates on 26 of 26 turns, outcome accuracy 1.000, p95 14.3 s, README turns 8.8 s and 10.7 s,
+"Pflugerville, TX" and "Austin, TX" turns 7.5 s and 9.4 s; `just sam-local` passed 4 of 4 on the image before the fix pass.
 The secret `staraptor-agent/langsmith-api-key` exists already (2026-10-20). The coordinator deploys:
 
 ```zsh
@@ -697,14 +698,17 @@ API_BASE=$(out ApiBase)
 npx tsx apps/api/scripts/golden.ts --target "$API_BASE" --label live 2>&1 | tail -40
 ```
 
-Pass: `"pass": true` under `hard_gates`, `outcome_accuracy` at least 0.95, `latency_ms_p95` under 15000 and both
-`readme_turn_ms` under 15000 (21 cases: the tool-text injection case is local-only); the run writes its result file to
-`fixtures/rag/results/`.
+Pass: `"pass": true` under `hard_gates`, `outcome_accuracy` at least 0.95, `latency_ms_p95` under 15000, and both
+`readme_turn_ms` and both `state_suffix_turn_ms` under 15000 (23 cases: the tool-text injection case is local-only); the
+run writes its result file to `fixtures/rag/results/`.
 
 ### Check 2: the README's two agent prompts in the explorer
 
 Open `ExplorerUrl`, tab **Agent**, click **Ask the agent** (the first README prompt is filled in), then, once it has
 answered, **Ask the agent** again (the second prompt is filled in next).
+
+The tab prewarms the chat function at most once per 5 minutes; each prewarm and each `just warm` chat warm-up counts
+toward the 200-a-day invocation limit that sets the kill switch.
 
 Pass: both answers show the badge `answered`, a short answer with citation chips, assumptions (the Austin centroid's basis),
 limitations (BBB blocked on the second), an evidence table and `model us.anthropic.claude-sonnet-4-6` under Tool calls;
