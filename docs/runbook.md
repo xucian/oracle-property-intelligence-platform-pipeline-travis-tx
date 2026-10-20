@@ -595,9 +595,9 @@ just deploy-api
 
 `deploy-api` exports the serving set, uploads its Parquet files to the deploy bucket, then pushes an image of about
 0.6 GB to ECR; CDK asks to approve IAM changes when there are any (section 30: `s3:GetObject` on the bucket's
-`serving/*` for both functions; section 31: the warm-up schedules' role, `lambda:InvokeFunction` on the API function).
-Last it runs `just warm`, which opens and primes the configured number of API instances at once, so the slow first
-cold starts after a new image land on the deploy, not on a reviewer. Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
+`serving/*` for both functions). Last it runs `just warm`, which opens and primes three API instances at once, so the
+slow first cold starts of a new image land on the deploy, not on a reviewer (section 31). Run `just warm` again before
+a live demo and before marking the PRs ready for review. Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
 afterwards (once; already done on 2026-10-20):
 
 ```zsh

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ApiError } from '@travis/api-client';
 import { fmtTime } from '../lib/format.js';
 
@@ -22,10 +22,19 @@ export function Section({
   );
 }
 
+/** After a few seconds it says why: an idle API opens its data service on the first call (decisions.md section 31). */
 export function Loading({ what }: { what: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <p className="muted" role="status">
       Loading {what}…
+      {slow
+        ? ' The first request after a quiet period starts the data service, which can take up to about 15 seconds.'
+        : null}
     </p>
   );
 }

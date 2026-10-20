@@ -1999,40 +1999,51 @@ Contract v1 is unchanged. The operator approved the direction; the kit's `metagr
 - **Uploaded 2026-10-20:** `serving/e17c90aa0b91ccae/`, 6 objects, 585 MB, every checksum accepted by S3. Check 1 measures
   the cold times on Lambda after the next `deploy-api`.
 
-## 31. 2026-10-20: T7 margin — warm-ups and a prefetch, so the demo never meets the slow cold start
+## 31. 2026-10-20: T7 margin — no standing warm-ups; a deploy-time warm-up, an init prefetch and client prewarm
 
 The operator's ruling after section 30's deploy: 8.6 s against the CRM's 10 s is too tight for a demo; look at the
-adjacent paths too.
+adjacent paths too; prefer an honest loading state and a prewarm triggered by real use over keeping Lambda busy.
+
+- **Where the limits are.** The 10 s was the T7 handoff's own gate target, not a timeout. The real limits:
+
+  | Limit | Where |
+  | --- | --- |
+  | 15 s per attempt, one retry on a GET `5xx` or timeout, one call in flight | the CRM's browser (roofing-crm decisions, "Transport") |
+  | 8 s per call | the CRM's own Lambda calling the pipeline (F5, later) |
+  | 25 s | the API function's timeout |
+  | 30 s | API Gateway's HTTP API integration cap (fixed) |
 
 - **Measured on Lambda after section 30's deploy** (2026-10-20, curl from the operator's machine). Seven different
-  operations sent at once, each landing on a new instance of the freshly pushed image: 7.9-9.4 s each, text search
-  15.0 s (handler 5.6-7.4 s and 12.6 s, init 0.8-1.0 s). The same calls on instances already open but without that
-  query's data: 0.6-3.1 s. A second wave of cold starts minutes later: 4.6 s for the CRM call (handler 2.5 s). So S3 is
-  not the cost: the slow part is the image's blocks on a new instance of a new image. They are httpfs (19.9 MB) and fts
-  (10.8 MB) as DuckDB loads them, and the text index pages in the serving file, read at the image's slow rate until
-  Lambda caches them. That is the first contact after every deploy, and likely after long idle: when a reviewer arrives.
-  Section 30's gate models S3 reads, not image reads, so it could not see this. It stays the gate for the query layer;
-  check 1 measures the live path.
-- **Warm-ups.** EventBridge Scheduler invokes the API function `warm.instances` times at once (3) every
-  `warm.everyMinutes` (5) with `{"warm": {"hold_ms": 1500}}`. Each warm-up opens the instance if needed, and once per
-  instance runs the demo's default calls. Those are meta, the CRM's main call, the default 5-mile property and permit
-  searches around central Austin, and a county-wide text search, so their footers, row groups and text index pages are
-  cached. Then it holds 1.5 s, so simultaneous warm-ups need separate instances. The role may only
-  `lambda:InvokeFunction` the API function; template tests assert it. Three keeps seven of the account's ten concurrent
-  executions free for real traffic; `instances: 0` turns the warm-ups off. Each instance logs `cold start`
-  (prefetch, open, ready ms) and each warm-up `warm call` per operation, so cold-start times are measured continuously.
-- **After every deploy**, `just deploy-api` ends with `just warm`, which sends the same warm-ups at once, so the new
-  image's first, slowest cold starts land on the deploy.
+  operations sent at once, each on a new instance of the freshly pushed image: 7.9-9.4 s each, text search 15.0 s
+  (handler 5.6-7.4 s and 12.6 s, init 0.8-1.0 s). The same calls on instances already open, without that query's data:
+  0.6-3.1 s. Cold starts minutes later: 4.6 s for the CRM call (handler 2.5 s). So S3 is not the cost. The slow part is
+  the image's blocks on a new instance of a new image: httpfs (19.9 MB) and fts (10.8 MB) as DuckDB loads them, and the
+  serving file's text index pages, read at the image's slow rate until Lambda caches them. Section 30's gate models S3
+  reads, not image reads, so it stays the gate for the query layer, and check 1 measures the live path.
+- **No standing warm-up.** EventBridge Scheduler pings (3 at once every 5 minutes, about 114,000 GB-s a month, inside
+  the free tier) were built and dropped before any deploy. They run whether anyone uses the API or not: the ongoing
+  cost README.md rules out by default ("does not carry ongoing infrastructure cost by default"). Free tier or not, that
+  is a server kept warm. The kit has no rule on warmers, standing schedules or loading states (arceus,
+  2026-10-20: the only cold-start line is `apply-engineering-guidelines/rules/stack-typescript-for-apis.md:13`). A
+  template test asserts that the only schedule in `TravisApi` is the daily flag clear. Provisioned concurrency is out
+  for the same reason, and the 10-execution cap leaves none to allocate.
+- **A warm-up at deploy time and before a demo.** The API function accepts `{"warm": {"hold_ms": 1500}}`: it opens the
+  instance and, once per instance, runs the demo's default calls (meta, the CRM's main call, the 5-mile property and
+  permit searches around central Austin, a county-wide text search), then holds 1.5 s so simultaneous warm-ups take
+  separate instances. `just warm n=3` sends n of them. `just deploy-api` ends with it, so the new image's slowest cold
+  starts land on the deploy, and the operator runs it before a live demo and before marking the PRs ready for review.
+  Cost: a few invocations per deploy or demo.
 - **Prefetch at init.** In Lambda each instance reads the bundled extensions and the serving file once, in 4 MB chunks
   with 4 in flight, before DuckDB opens them. The open starts at init, not at the first request. The prefetch is
-  bounded at 3 s and failures are logged, never raised, so at worst the open starts later. The `cold start` log line
-  shows whether it pays.
-- **Cost.** 3 × 1.5 s every 5 minutes at 3008 MB is about 114,000 GB-s a month (inside Lambda's always-free 400,000;
-  otherwise about $1.50) and about 26,000 invocations. No provisioned concurrency: under the 10-execution cap it cannot
-  be allocated, and it would not cache data.
-- **Clients.** The contract already lets clients retry a non-chat `5xx` and asks them to back off on `429`. The CRM is
-  told to wait up to 25 s per call, retry a `GET` search once on a `5xx`, `504` or network error, and show a loading
-  state. The explorer already retries a failed query once.
-- **Not covered.** A burst wider than the warm instances meets a cold start of the steady-state kind (about 5 s), and
-  so does a call in the minutes after Lambda recycles an instance, before the next warm-up. The chat function is a
-  placeholder that opens no DuckDB; when T9 gives it the query layer, it gets the same warm-up.
+  bounded at 3 s and its failures are logged, never raised. A `cold start` log line (prefetch, open and ready ms) on
+  every instance shows whether it pays. It costs nothing while the API is idle.
+- **Clients prewarm when a person opens them.** The explorer's API client sends the page's first call alone and holds
+  the calls that start with it until it answers (`firstCallAlone` in `packages/api-client`). On an idle API they then
+  land on the one instance it opened, instead of each opening a cold one. After 3 s `Loading` says why: "The first
+  request after a quiet period starts the data service, which can take up to about 15 seconds." The CRM's calls already
+  go out one at a time. It is told to send `GET /v1/meta` when the page opens, so the first search queues behind it, and
+  to show the same kind of message. It should allow 25 s per attempt, not 15: the instance a timed-out attempt opened is
+  still busy, so a quick retry only opens a second cold one. Its F5 agent's 8 s per call needs the same prewarm at the
+  start of a chat.
+- **What a reviewer can still meet.** On an idle API, the first call after a quiet period takes about 5 s (8-9 s if
+  Lambda has dropped the image's cached blocks), behind a loading message that says why. Later calls take 0.6-3 s.

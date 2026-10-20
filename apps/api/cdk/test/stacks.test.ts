@@ -345,25 +345,10 @@ describe('TravisApi stack', () => {
       });
     });
 
-    it('warms the API function: config.warm.instances simultaneous schedules, a role that may only invoke it', () => {
-      const warm = (Object.values(api.findResources('AWS::Scheduler::Schedule')) as Json[]).filter(
-        (x) => String(x.Properties.Target.Input ?? '').includes('"warm"'),
-      );
-      expect(warm).toHaveLength(config.warm.instances);
-      for (const x of warm) {
-        expect(x.Properties.ScheduleExpression).toBe(`rate(${config.warm.everyMinutes} minutes)`);
-        expect(x.Properties.FlexibleTimeWindow).toEqual({ Mode: 'OFF' });
-        expect(JSON.stringify(x.Properties.Target.Arn)).toContain('ApiFunction');
-      }
-      const roleId = Object.keys(api.findResources('AWS::IAM::Role')).find((k) =>
-        k.startsWith('WarmSchedulerRole'),
-      )!;
-      const statements = (Object.values(api.findResources('AWS::IAM::Policy')) as Json[])
-        .filter((x) => JSON.stringify(x.Properties.Roles).includes(roleId))
-        .flatMap((x) => x.Properties.PolicyDocument.Statement as Json[]);
-      expect(statements).toHaveLength(1);
-      expect(statements[0]!.Action).toBe('lambda:InvokeFunction');
-      expect(JSON.stringify(statements[0]!.Resource)).toContain('ApiFunction');
+    it('has no standing schedule but the daily flag clear (no warm-up pings; decisions.md section 31)', () => {
+      const schedules = Object.keys(api.findResources('AWS::Scheduler::Schedule'));
+      expect(schedules).toHaveLength(1);
+      expect(schedules[0]).toMatch(/^ClearBudgetFlagDaily/);
     });
 
     it('does not use reserved concurrency zero as the kill switch', () => {

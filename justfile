@@ -98,14 +98,14 @@ deploy-api: _need-profile _need-docker build-api serving (stage-db "current")
     if [ -n "$b" ] && [ "$b" != "None" ]; then upload "$b"; fi
     (cd "{{ cdk_dir }}" && AWS_PROFILE="{{ profile }}" CDK_CONFIG="{{ cdk_config }}" npx cdk deploy TravisApi --outputs-file "{{ cdk_dir }}/cdk.out/TravisApi.outputs.json")
     if [ -z "$b" ] || [ "$b" = "None" ]; then upload "$(bucket)"; fi
-    just profile="{{ profile }}" cdk_config="{{ cdk_config }}" warm
+    just profile="{{ profile }}" warm
 
-# Send the scheduled warm-up to the API function now, once per configured instance (decisions.md section 31).
-warm: _need-profile
+# Open and prime n API instances now: after a deploy (deploy-api runs it) and before a live demo (decisions.md section 31).
+warm n="3": _need-profile
     #!/usr/bin/env bash
     set -euo pipefail
     export PATH="/opt/homebrew/bin:$PATH"
-    n="$(node -p "require('{{ cdk_config }}').warm?.instances ?? 3")"
+    n="{{ n }}"
     fn="$(aws cloudformation describe-stacks --stack-name TravisApi --region {{ region }} --profile "{{ profile }}" \
       --query "Stacks[0].Outputs[?OutputKey=='ApiFunctionName'].OutputValue" --output text)"
     for ((i = 0; i < n; i++)); do
@@ -113,7 +113,7 @@ warm: _need-profile
         --cli-binary-format raw-in-base64-out --payload '{"warm":{"hold_ms":1500}}' /dev/null >/dev/null &
     done
     wait
-    echo "warm: $n warm-ups sent to $fn (each opens and primes one instance; the schedules repeat it)"
+    echo "warm: $n warm-ups sent to $fn (each opens and primes one instance)"
 
 [private]
 build-api:

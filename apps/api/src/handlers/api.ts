@@ -66,7 +66,7 @@ export function getQueries(): Promise<Queries> {
 // Start at init, so the first request finds the instance ready or nearly so.
 if (process.env.AWS_LAMBDA_FUNCTION_NAME) getQueries().catch(() => undefined);
 
-/** The scheduled warm-up's event (TravisApi `WarmApi<n>` schedules; `just deploy-api` sends the same). */
+/** The warm-up event `just warm` sends (after every deploy, and before a live demo; decisions.md section 31). */
 export interface WarmEvent {
   warm: { hold_ms?: number };
 }
