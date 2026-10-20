@@ -1,12 +1,16 @@
 // Builds the golden set (decisions.md section 20, "Golden set"): fixtures/rag/queries/<case>.json. Each turn records the
-// expected tool sequence and parameters, the expected ids computed by the query layer's SQL from those parameters on the
-// deploy's DuckDB file (data/deploy/current/travis.duckdb, whose answers equal the serving set's by the section 30 gate),
-// and the expected outcome. Text-search turns add hand-labelled relevant permit ids.
+// expected tool sequence and parameters, the expected ids and the expected outcome. For the README conversation and the
+// two state-suffix cases the ids come from independent SQL written from the contract's definitions over the serving set's
+// own Parquet files (data/deploy/current/serving), not from the query functions the tools call, so id recall measures
+// more than the parameters (decisions.md section 32). The other cases take their ids from the query layer's SQL on the
+// deploy's DuckDB file (equal to the serving set's answers by the section 30 gate). Text-search turns add hand-labelled
+// relevant permit ids.
 // Usage: npx tsx apps/api/scripts/golden-build.ts
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { searchPermitsParams, searchPropertiesParams, textSearchParams } from '@travis/contract';
+import { DuckDBInstance } from '@duckdb/node-api';
 import { Queries } from '@travis/query';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -38,6 +42,7 @@ interface ExpectedIds {
   tool: string;
   values: string[];
   total: number;
+  computed_by?: string;
 }
 interface Turn {
   user: string;
@@ -65,22 +70,99 @@ interface Case {
 
 const ids = (r: any, key: string) => (r.items as any[]).map((i) => String(i[key]));
 
+// ---- independent SQL over the serving set's Parquet files ----------------------------------------------------------------
+const serving = path.join(repo, 'data/deploy/current/serving');
+const indie = await (await DuckDBInstance.create(':memory:')).connect();
+await indie.run(
+  `CREATE VIEW props AS SELECT * FROM read_parquet('${serving}/properties.*.parquet')`,
+);
+await indie.run(`CREATE VIEW perms AS SELECT * FROM read_parquet('${serving}/permits.*.parquet')`);
+const sql = async (text: string) => (await indie.runAndReadAll(text)).getRowObjectsJson() as any[];
+const asOf = new Date().toISOString().slice(0, 10);
+/** Great-circle miles (contract: "Distances"), Earth radius 3,958.8 mi. */
+const miles = (lat: number, lon: number, la: string, lo: string) =>
+  `2 * 3958.8 * asin(sqrt(power(sin(radians(${la} - ${lat}) / 2), 2) + cos(radians(${lat})) * cos(radians(${la})) * power(sin(radians(${lo} - ${lon}) / 2), 2)))`;
+interface Independent {
+  values: string[];
+  total: number;
+}
+/** Contract "Search center": the centroid of a situs city's parcels with coordinates. */
+async function indieCenter(cityNorm: string) {
+  const [r] = await sql(
+    `SELECT avg(lat) AS lat, avg(lon) AS lon FROM props WHERE situs_city_norm = '${cityNorm}' AND lat IS NOT NULL`,
+  );
+  return { lat: Number(r.lat), lon: Number(r.lon) };
+}
+/**
+ * Contract "GET /v1/properties/search" with open_permits false: within the radius and roof_age_years > roof_age_min;
+ * sorted with an open roofing permit first, then stalled, each by open duration, then roof age, distance, property_id.
+ */
+async function indieProperties(
+  c: { lat: number; lon: number },
+  radius: number,
+  ageMin: number,
+): Promise<Independent> {
+  const base = `SELECT property_id, roof_age_years, roofing_open_count, roofing_stalled_count, open_roofing_min_open_since,
+      stalled_roofing_max_duration_days, ${miles(c.lat, c.lon, 'lat', 'lon')} AS d
+    FROM props WHERE lat IS NOT NULL AND lon IS NOT NULL`;
+  const where = `d <= ${radius} AND roof_age_years > ${ageMin}`;
+  const [t] = await sql(`SELECT count(*) AS n FROM (${base}) WHERE ${where}`);
+  const rows = await sql(`SELECT property_id FROM (${base}) WHERE ${where}
+    ORDER BY CASE WHEN roofing_open_count > 0 THEN 0 WHEN roofing_stalled_count > 0 THEN 1 ELSE 2 END,
+      CASE WHEN roofing_open_count > 0 THEN date_diff('day', open_roofing_min_open_since, DATE '${asOf}')
+           WHEN roofing_stalled_count > 0 THEN stalled_roofing_max_duration_days END DESC NULLS LAST,
+      roof_age_years DESC NULLS LAST, d ASC, property_id ASC LIMIT 20`);
+  return { values: rows.map((r) => String(r.property_id)), total: Number(t.n) };
+}
+/**
+ * Contract "GET /v1/permits/search" defaults: roofing only, open or stalled, open_duration_days of at least N years (open:
+ * today − open_since; stalled: its static duration), measured from the permit's radius point; open before stalled, then
+ * open_duration_days desc, then permit_id.
+ */
+async function indiePermits(
+  c: { lat: number; lon: number },
+  radius: number,
+  minYears: number,
+): Promise<Independent> {
+  const base = `SELECT permit_id, status_group, ${miles(c.lat, c.lon, 'radius_lat', 'radius_lon')} AS d,
+      CASE status_group WHEN 'open' THEN date_diff('day', open_since, DATE '${asOf}') WHEN 'stalled' THEN static_duration_days END AS od
+    FROM perms WHERE radius_lat IS NOT NULL AND is_roofing AND status_group IN ('open', 'stalled')`;
+  const where = `d <= ${radius} AND od >= ${minYears * 365}`;
+  const [t] = await sql(`SELECT count(*) AS n FROM (${base}) WHERE ${where}`);
+  const rows = await sql(`SELECT permit_id FROM (${base}) WHERE ${where}
+    ORDER BY CASE status_group WHEN 'open' THEN 0 ELSE 1 END, od DESC NULLS LAST, permit_id ASC LIMIT 20`);
+  return { values: rows.map((r) => String(r.permit_id)), total: Number(t.n) };
+}
+const agreement: string[] = [];
+/** Records whether the independent ids equal the query layer's (they should; a difference is a finding). */
+function compare(label: string, independent: Independent, layer: any, key: string) {
+  const same =
+    independent.total === layer.total && independent.values.join() === ids(layer, key).join();
+  agreement.push(
+    `${label.slice(0, 60)}: independent SQL ${same ? 'equals' : 'DIFFERS FROM'} the query layer (total ${independent.total} vs ${layer.total})`,
+  );
+}
+const INDEPENDENT = 'independent SQL over the serving Parquet files';
+
 async function propertiesTurn(
   user: string,
   args: Record<string, unknown>,
   tools: ExpectedTool[],
+  independent?: Independent,
 ): Promise<Turn> {
   const r = await q.searchProperties(searchPropertiesParams('mcp').parse(args));
+  if (independent) compare(user, independent, r, 'property_id');
+  const exp = independent ?? { values: ids(r, 'property_id'), total: r.total };
   return {
     user,
     expected: {
-      outcomes: r.total > 0 ? ['answered'] : ['no_matches'],
+      outcomes: exp.total > 0 ? ['answered'] : ['no_matches'],
       tools: [...tools, { name: 'search_properties', args }],
       ids: {
         kind: 'property',
         tool: 'search_properties',
-        values: ids(r, 'property_id'),
-        total: r.total,
+        ...exp,
+        computed_by: independent ? INDEPENDENT : 'query layer',
       },
     },
   };
@@ -90,20 +172,36 @@ async function permitsTurn(
   args: Record<string, unknown>,
   tools: ExpectedTool[],
   match: Record<string, unknown> = args,
+  independent?: Independent,
 ): Promise<Turn> {
   const r = await q.searchPermits(searchPermitsParams('mcp').parse(args));
+  if (independent) compare(user, independent, r, 'permit_id');
+  const exp = independent ?? { values: ids(r, 'permit_id'), total: r.total };
   return {
     user,
     expected: {
-      outcomes: r.total > 0 ? ['answered'] : ['no_matches'],
+      outcomes: exp.total > 0 ? ['answered'] : ['no_matches'],
       tools: [...tools, { name: 'search_permits', args: match }],
-      ids: { kind: 'permit', tool: 'search_permits', values: ids(r, 'permit_id'), total: r.total },
+      ids: {
+        kind: 'permit',
+        tool: 'search_permits',
+        ...exp,
+        computed_by: independent ? INDEPENDENT : 'query layer',
+      },
     },
   };
 }
 
 const AUSTIN = await center('Austin');
 const PFL = await center('Pflugerville');
+const AUSTIN_INDIE = await indieCenter('austin');
+if (
+  Math.abs(AUSTIN_INDIE.lat - AUSTIN.lat) > 1e-9 ||
+  Math.abs(AUSTIN_INDIE.lon - AUSTIN.lon) > 1e-9
+)
+  throw new Error(
+    `independent Austin centroid ${JSON.stringify(AUSTIN_INDIE)} differs from the search center`,
+  );
 const LAKEWAY = await center('Lakeway');
 const Z78704 = await center('78704');
 const Z78745 = await center('78745');
@@ -155,22 +253,47 @@ const r5 = { radius_miles: 5 };
 const cases: Case[] = [
   {
     id: 'readme-two-turn',
-    description: "README.md's two agent prompts as one conversation, with Austin as the city.",
+    description:
+      "README.md's two agent prompts as one conversation, with Austin as the city. Expected ids from independent SQL.",
     turns: [
       await propertiesTurn(
         README_1,
         { ...at(AUSTIN), ...r5, roof_age_min: 15, open_permits: false },
         [resolve('Austin')],
+        await indieProperties(AUSTIN_INDIE, 5, 15),
       ),
       await permitsTurn(
         README_2,
         { ...at(AUSTIN), ...r5, min_open_years: 5 },
         [resolve('Austin')],
-        {
-          ...at(AUSTIN),
-          ...r5,
-          min_open_years: { $in: [5, 10] },
-        },
+        { ...at(AUSTIN), ...r5, min_open_years: { $in: [5, 10] } },
+        await indiePermits(AUSTIN_INDIE, 5, 5),
+      ),
+    ],
+  },
+  {
+    id: 'state-suffix-pflugerville',
+    description:
+      'A place written with its state ("Pflugerville, TX"): the agent drops the suffix and answers. Expected ids from independent SQL.',
+    turns: [
+      await propertiesTurn(
+        'Which properties within five miles of Pflugerville, TX have roofs older than 15 years?',
+        { ...at(PFL), ...r5, roof_age_min: 15, open_permits: false },
+        [{ name: 'resolve_search_center', args: { q: { $contains: ['pflugerville'] } } }],
+        await indieProperties(await indieCenter('pflugerville'), 5, 15),
+      ),
+    ],
+  },
+  {
+    id: 'state-suffix-austin',
+    description:
+      '"Austin, TX" matches a 1-parcel AUSTIN TX exactly in the contract lookup; the agent drops the suffix and uses AUSTIN. Expected ids from independent SQL.',
+    turns: [
+      await propertiesTurn(
+        'Within 5 miles of Austin, TX, which properties have roofs older than 15 years?',
+        { ...at(AUSTIN), ...r5, roof_age_min: 15, open_permits: false },
+        [{ name: 'resolve_search_center', args: { q: { $contains: ['austin'] } } }],
+        await indieProperties(AUSTIN_INDIE, 5, 15),
       ),
     ],
   },
@@ -473,6 +596,7 @@ for (const c of cases) {
     `${JSON.stringify({ ...c, computed_on: `deploy ${deployId}`, built_at: new Date().toISOString().slice(0, 10) }, null, 2)}\n`,
   );
 }
+for (const a of agreement) console.log(a);
 console.log(
   `${cases.length} cases, ${cases.reduce((a, c) => a + c.turns.length, 0)} turns -> ${path.relative(repo, outDir)}`,
 );

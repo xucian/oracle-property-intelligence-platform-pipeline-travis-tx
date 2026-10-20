@@ -190,23 +190,42 @@ const callMatches = (want: { name: string; args: Record<string, unknown> }, call
   call.name === want.name &&
   Object.entries(want.args).every(([k, v]) => matchArg(v, call.args?.[k]));
 
+/** The hard gate, checked again from the response alone: ids in tokens, bare ids, link paths and CIDs (review S1). */
 function gateCitations(b: any): { ok: boolean; bad: string[] } {
   const bad: string[] = [];
-  const answer: string = b.answer ?? '';
+  const text: string = [...(b.assumptions ?? []), b.answer ?? ''].join('\n');
   const ev: any[] = b.evidence ?? [];
-  for (const m of answer.matchAll(/\[\[([^\]\n]*)\]\]/g)) {
+  const has = (kind: string, id: string) =>
+    kind === 'run'
+      ? id === b.run_id && ev.some((e) => e.kind === 'run')
+      : kind === 'property'
+        ? ev.some((e) => (e.kind === 'property' || e.kind === 'permit') && e.property_id === id)
+        : !!ID_FIELD[kind] && ev.some((e) => e.kind === kind && e[ID_FIELD[kind]!] === id);
+  for (const m of text.matchAll(/\[\[([^\]\n]*)\]\]/g)) {
     const [kind, ...rest] = m[1]!.split(':');
-    const id = rest.join(':').trim();
-    const ok =
-      kind === 'run'
-        ? id === b.run_id && ev.some((e) => e.kind === 'run')
-        : kind === 'property'
-          ? ev.some((e) => (e.kind === 'property' || e.kind === 'permit') && e.property_id === id)
-          : !!ID_FIELD[kind!] && ev.some((e) => e.kind === kind && e[ID_FIELD[kind!]!] === id);
-    if (!ok) bad.push(m[0]);
+    if (!has(kind!, rest.join(':').trim())) bad.push(m[0]);
   }
+  const plain = text.replace(/\[\[[^\]\n]*\]\]/g, ' ');
+  for (const m of plain.matchAll(/\b(\d{4}-\d{6})[ -]?([A-Z]{2})\b/g))
+    if (!has('permit', `${m[1]} ${m[2]}`)) bad.push(m[0]);
+  for (const m of plain.matchAll(/\b[0-9a-f]{32}\b/g))
+    if (!['contractor', 'business', 'license'].some((k) => has(k, m[0]))) bad.push(m[0]);
+  for (const m of plain.matchAll(/\bproperty(?:\s+id)?\s*(?:#|no\.|number)?\s*:?\s*(\d{3,9})\b/gi))
+    if (!has('property', m[1]!)) bad.push(m[0]);
+  const kinds: Record<string, string> = {
+    properties: 'property',
+    permits: 'permit',
+    contractors: 'contractor',
+    businesses: 'business',
+    licenses: 'license',
+    runs: 'run',
+  };
+  for (const m of plain.matchAll(
+    /\/v1\/(properties|permits|contractors|businesses|licenses|runs)\/([^\s)"'\]>#?]+)/g,
+  ))
+    if (!has(kinds[m[1]!]!, decodeURIComponent(m[2]!))) bad.push(m[0]);
   const cids = new Set(ev.map((e) => e.record_cid).filter(Boolean));
-  for (const m of answer.matchAll(/\bba[a-z2-7]{40,}\b/g)) {
+  for (const m of text.matchAll(/\bba[a-z2-7]{40,}\b/g)) {
     const ok = cids.has(m[0]) || (m[0] === b.manifest_cid && ev.some((e) => e.kind === 'run'));
     if (!ok) bad.push(m[0]);
   }
@@ -335,6 +354,7 @@ for (const fx of selected) {
         : null,
       cost_usd: cost === null ? null : Math.round(cost * 10000) / 10000,
       request_id: b.request_id ?? null,
+      prompt_version: b.prompt_version ?? null,
       answer_sha256: answer ? createHash('sha256').update(answer).digest('hex').slice(0, 16) : null,
       // owner and contact answers stay out of the repository (decisions.md section 20, "Personal data")
       answer_excerpt: fx.id === 'owner-contact' ? '[omitted: personal view]' : answer.slice(0, 600),
@@ -358,12 +378,14 @@ for (const fx of selected) {
 
 const ok200 = turns.filter((t) => t.status === 200);
 const readme = turns.filter((t) => t.case === 'readme-two-turn');
+const stateSuffix = turns.filter((t) => t.case.startsWith('state-suffix-'));
 const withStats = turns.filter((t) => t.stats);
 const summary = {
   run_id: runId,
   target: local ? 'local' : opt.target,
   model_id: modelId,
   label: opt.label ?? null,
+  prompt_version: turns.find((t) => t.prompt_version)?.prompt_version ?? null,
   cases: selected.length,
   turns: turns.length,
   hard_gates: {
@@ -393,6 +415,7 @@ const summary = {
       100,
     ),
     readme_turn_ms: readme.map((t) => t.ms),
+    state_suffix_turn_ms: stateSuffix.map((t) => t.ms),
     model_ms_p50: pct(
       withStats.map((t) => t.stats.model_ms),
       50,

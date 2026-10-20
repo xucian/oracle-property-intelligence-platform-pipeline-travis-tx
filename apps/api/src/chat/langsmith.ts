@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import * as ai from 'ai';
 import { Client } from 'langsmith/client';
@@ -21,7 +22,7 @@ export interface LangSmithFacade {
   flush: (maxMs: number) => Promise<void>;
 }
 
-const PLAIN: LangSmithFacade = {
+export const PLAIN_FACADE: LangSmithFacade = {
   tracingEnabled: false,
   ToolLoopAgent: ai.ToolLoopAgent,
   providerOptions: () => ({}),
@@ -45,19 +46,33 @@ const PERSON_IN_JSON =
  * clears the set after each turn's flush.
  */
 const personValues = new Set<string>();
+/** The client-sent history of the current turn: hidden in traces as hashes (review S4). */
+const historyValues = new Map<string, string>();
+export function registerHistory(contents: string[]): void {
+  for (const c of contents)
+    if (c.trim().length >= 4)
+      historyValues.set(
+        c,
+        `[earlier message sha256:${createHash('sha256').update(c).digest('hex').slice(0, 16)}]`,
+      );
+}
 export function registerPersonValues(values: (string | null | undefined)[]): void {
   for (const v of values)
     if (typeof v === 'string' && v.trim().length >= 4) personValues.add(v.trim());
 }
 export function clearPersonValues(): void {
   personValues.clear();
+  historyValues.clear();
 }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Deep copy with person fields replaced, inside objects and inside JSON text (tool results travel as text). */
 export function hidePersonFields(v: unknown): unknown {
   if (typeof v === 'string') {
-    let out = v.includes('"') ? v.replace(PERSON_IN_JSON, '"$1":"[hidden]"') : v;
+    let out = historyValues.get(v) ?? v;
+    for (const [h, label] of historyValues)
+      if (h !== v && out.includes(h)) out = out.split(h).join(label);
+    if (out.includes('"')) out = out.replace(PERSON_IN_JSON, '"$1":"[hidden]"');
     for (const p of personValues)
       if (out.includes(p)) out = out.replace(new RegExp(escapeRe(p), 'g'), '[hidden]');
     return out;
@@ -92,20 +107,22 @@ export const readSecretFromSecretsManager: SecretReader = async (secretId, regio
   const { SecretsManagerClient, GetSecretValueCommand } = createRequire(import.meta.url)(
     '@aws-sdk/client-secrets-manager',
   ) as typeof import('@aws-sdk/client-secrets-manager');
-  const r = await new SecretsManagerClient(region ? { region } : {}).send(
-    new GetSecretValueCommand({ SecretId: secretId }),
-  );
+  const r = await new SecretsManagerClient({
+    ...(region ? { region } : {}),
+    maxAttempts: 2,
+    requestHandler: { connectionTimeout: 1000, requestTimeout: 1000 },
+  }).send(new GetSecretValueCommand({ SecretId: secretId }));
   const value = r.SecretString?.trim();
   if (!value) throw new Error('the LangSmith secret is empty');
   return value;
 };
 
 async function build(env: LangSmithEnv, readSecret: SecretReader): Promise<LangSmithFacade> {
-  if ((env.LANGSMITH_TRACING ?? 'true') !== 'true') return PLAIN;
+  if ((env.LANGSMITH_TRACING ?? 'true') !== 'true') return PLAIN_FACADE;
   let key = env.LANGSMITH_API_KEY?.trim();
   if (!key && env.LANGSMITH_API_KEY_SECRET_ID)
     key = await readSecret(env.LANGSMITH_API_KEY_SECRET_ID, env.AWS_REGION);
-  if (!key) return PLAIN;
+  if (!key) return PLAIN_FACADE;
   const project = env.LANGSMITH_PROJECT ?? 'staraptor-agent';
   // The wrapper reads the project and endpoint from the environment.
   process.env.LANGSMITH_PROJECT = project;
@@ -140,14 +157,14 @@ async function build(env: LangSmithEnv, readSecret: SecretReader): Promise<LangS
 }
 
 /**
- * One facade per instance. A failure to build it (secret unreadable, wrapper error) gives the plain AI SDK and is tried
- * again after `retryMs`, so a transient Secrets Manager error does not switch tracing off for the instance's life.
+ * One facade per instance. A failure to build it (secret unreadable, wrapper error) gives the plain AI SDK: tracing is
+ * off for that instance and the turn never fails (review S3). `retryMs` can let a later turn try again.
  */
 export function langSmithLoader(
   env: LangSmithEnv,
   readSecret: SecretReader = readSecretFromSecretsManager,
   onError: (e: unknown) => void = () => {},
-  retryMs = 300_000,
+  retryMs = Infinity,
   now: () => number = Date.now,
 ): () => Promise<LangSmithFacade> {
   let cached: Promise<LangSmithFacade> | null = null;
@@ -158,7 +175,7 @@ export function langSmithLoader(
     cached = build(env, readSecret).catch((e) => {
       onError(e);
       failedAt = now();
-      return PLAIN;
+      return PLAIN_FACADE;
     });
     return cached;
   };

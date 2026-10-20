@@ -49,7 +49,8 @@
             "276163",
             "274517"
           ],
-          "total": 14753
+          "total": 14753,
+          "computed_by": "query layer"
         }
       }
     }

@@ -51,7 +51,8 @@
             "2002-011714 BP",
             "2014-082039 BP"
           ],
-          "total": 23
+          "total": 23,
+          "computed_by": "query layer"
         }
       }
     }

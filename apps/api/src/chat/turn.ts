@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isStepCount, type ModelMessage, type ToolLoopAgent, wrapLanguageModel } from 'ai';
 import type { Limitation, Meta } from '@travis/contract';
 import type { Queries } from '@travis/query';
+import { sanitizeAnswer, type LinkPolicy } from './answer.js';
 import { BEDROCK_PROMPT_CACHE_METADATA } from './bedrock-prompt-cache.js';
 import { checkCitations } from './citations.js';
 import { EvidenceCollector, turnAssumptions, turnLimitations, type Evidence } from './evidence.js';
@@ -101,6 +102,8 @@ export interface TurnDeps {
   reserveMs?: number;
   maxSteps?: number;
   logToolCall?: (r: ToolCallRecord) => void;
+  /** Links the answer may keep (the API host the request came through; the gateways and `#/` routes always). */
+  links?: LinkPolicy;
   /** Local debugging only (the golden runner): the model's final text when the server withholds it. */
   onWithheld?: (e: {
     text: string;
@@ -140,7 +143,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   const guard = new CoordinateGuard(
     input.messages.filter((m) => m.role === 'user').map((m) => m.content),
   );
-  const { tools, records, usedCenters } = buildTurnTools({
+  const { tools, records, usedCenters, notes } = buildTurnTools({
     queries: deps.queries,
     evidence,
     guard,
@@ -242,7 +245,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   if (budget.modelTimeouts > 0 && !bedrockFailure) bedrockFailure = 'server_error';
 
   const okCalls = records.filter((r) => r.status === 'ok').length;
-  const assumptions = turnAssumptions(evidence, usedCenters);
+  const assumptions = [...notes, ...turnAssumptions(evidence, usedCenters)];
   const limitations = turnLimitations(meta, evidence);
   const respond = (
     outcome: Outcome,
@@ -269,21 +272,24 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   });
 
   if (stoppedBy) return respond('limit_reached', LIMIT_TEXT, []);
+  // Every tool_error carries no model text at all: no answer, no model assumptions (review B1).
   if (failure) return respond('tool_error', '', []);
 
   const parsed = parseFinalMessage(text);
-  let answer = parsed.answer;
+  // No HTML, no images, links only to the API, the explorer and the gateways: enforced here, not only in the explorer.
+  const links = deps.links ?? {};
+  let answer = sanitizeAnswer(parsed.answer, links);
+  const modelAssumptions = parsed.assumptions.map((a) => sanitizeAnswer(a, links)).filter((a) => a);
   if (finishReason === 'length' && answer) answer = `${answer} …`;
   if (!answer) {
     deps.onWithheld?.({ text, reason: 'empty_answer', failures: [] });
-    return respond('tool_error', '', parsed.assumptions);
+    return respond('tool_error', '', []);
   }
-  const check = checkCitations(answer, evidence);
+  // The model's assumption lines are checked with the answer: they are model text too (review B1).
+  const check = checkCitations([...modelAssumptions, answer].join('\n'), evidence);
   if (!check.ok) {
     deps.onWithheld?.({ text, reason: 'citation_check', failures: check.failures });
-    return respond('tool_error', '', parsed.assumptions, {
-      citation_failures: check.failures.length,
-    });
+    return respond('tool_error', '', [], { citation_failures: check.failures.length });
   }
   // Without an OUTCOME line: a reply that cites nothing and asks something is a clarification question.
   const asks = check.cited.length === 0 && /\?/.test(answer);
@@ -293,11 +299,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   // `answered` (and `no_matches`, which also reports on the data) requires at least one successful tool call.
   if ((outcome === 'answered' || outcome === 'no_matches') && okCalls === 0) {
     deps.onWithheld?.({ text, reason: 'answered_without_tool', failures: [] });
-    return respond('tool_error', '', parsed.assumptions);
+    return respond('tool_error', '', []);
   }
   if (outcome === 'answered' && check.cited.length === 0 && evidence.items.length === 0)
     outcome = 'no_matches';
-  return respond(outcome, answer, parsed.assumptions, { cited: check.cited.length });
+  return respond(outcome, answer, modelAssumptions, { cited: check.cited.length });
 }
 
 function hasCause(e: unknown, cls: new (...a: never[]) => Error): boolean {

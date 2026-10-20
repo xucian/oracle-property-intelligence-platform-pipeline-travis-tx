@@ -26,6 +26,11 @@ import { CHAT_LIMITS, parseChatRequest } from '../src/chat/request.js';
 import { sanitizeText } from '../src/chat/sanitize.js';
 import { runTurn, type TurnDeps } from '../src/chat/turn.js';
 import { cachedFlag, createChatHandler, logParams } from '../src/handlers/chat.js';
+import { ChatResponse } from '@travis/contract';
+import { sanitizeAnswer } from '../src/chat/answer.js';
+import { langSmithLoader, registerHistory } from '../src/chat/langsmith.js';
+import { stripStateSuffix } from '../src/chat/tools.js';
+import { within } from '../src/handlers/chat.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -870,5 +875,232 @@ describe('chat handler', () => {
     t = 80_000;
     expect(await f()).toBe('false');
     expect(reads).toBe(3);
+  });
+});
+
+// ---- the fix pass after the alakazam review (2026-10-20) ---------------------------------------------------------------
+describe('review S1: ids outside the citation tokens', () => {
+  const c2 = new EvidenceCollector(RUN);
+  c2.add('search_permits', 'c1', {
+    total: 1,
+    items: [permit('2026-000001 BP', '300', 'a'.repeat(32), 1)],
+  });
+  it('accepts bare ids a tool returned in this turn', () => {
+    expect(checkCitations(`permit 2026-000001 BP is open, by ${'a'.repeat(32)}`, c2).ok).toBe(true);
+    expect(checkCitations('on property 300, see /v1/permits/2026-000001%20BP', c2).ok).toBe(true);
+    expect(checkCitations('50,260 properties; open since 1981-10-23; 139 permits', c2).ok).toBe(
+      true,
+    );
+  });
+  it('fails closed on bare ids, keys, property mentions and API link paths no tool returned', () => {
+    for (const bad of [
+      'permit 1981-013092 BP has been open 45 years',
+      'permit 1981-013092-BP',
+      `listed contractor ${'b'.repeat(32)}`,
+      'property 114347 again',
+      'Property ID 114347',
+      '[link](https://api.example/v1/permits/1981-013092%20BP)',
+      `https://api.example/v1/contractors/${'c'.repeat(32)}`,
+    ])
+      expect(checkCitations(bad, c2).ok, bad).toBe(false);
+  });
+});
+
+describe('review S2: the answer sanitizer', () => {
+  const p = { apiHost: 'api.example' };
+  it('removes HTML and images, keeps allowed links and only the text of the others', () => {
+    const s = sanitizeAnswer(
+      'A <img src=x onerror=alert(1)> b <script>x()</script> ![t](https://x.example/?d=SMITH) ![r][ref] ' +
+        '[api](https://api.example/v1/properties/1) [gw](https://ipfs.filebase.io/ipfs/bafy) [ex](#/runs) ' +
+        '[evil](https://evil.example/a) [js](javascript:alert(1)) <https://evil.example> https://evil.example/x ' +
+        'https://gateway.pinata.cloud/ipfs/bafy\n[ref]: https://evil.example/r',
+      p,
+    );
+    expect(s).not.toMatch(/<|>|!\[|evil\.|javascript|SMITH/);
+    expect(s).toContain('[api](https://api.example/v1/properties/1)');
+    expect(s).toContain('[gw](https://ipfs.filebase.io/ipfs/bafy)');
+    expect(s).toContain('[ex](#/runs)');
+    expect(s).toContain('https://gateway.pinata.cloud/ipfs/bafy');
+    expect(s).toMatch(/ evil js/);
+  });
+  it('keeps citation tokens, lists and comparisons', () => {
+    const t = 'Two match:\n\n- [[property:1]] roof 5 < 10 years\n- [[permit:2026-000001 BP]]';
+    expect(sanitizeAnswer(t, p)).toBe(t);
+  });
+});
+
+describe('state suffix in the agent place lookup', () => {
+  it('drops a trailing Texas suffix only', () => {
+    for (const [q, want] of [
+      ['Pflugerville, TX', 'Pflugerville'],
+      ['Austin TX', 'Austin'],
+      ['austin, texas', 'austin'],
+      ['Austin Texas', 'Austin'],
+      ['Round Rock,TX.', 'Round Rock'],
+      ['ATX', 'ATX'],
+      ['TX', 'TX'],
+      ['Texas', 'Texas'],
+      ['78704', '78704'],
+    ] as const)
+      expect(stripStateSuffix(q), q).toBe(want);
+  });
+});
+
+describe('review S4: the client history in traces', () => {
+  it('hides every earlier message as a hash', () => {
+    registerHistory(['Who owns property 103857?', 'The owner is BRAND JAMES RUTLAND.', 'ok']);
+    const j = JSON.stringify(
+      hidePersonFields({
+        messages: [
+          { role: 'user', content: 'Who owns property 103857?' },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'The owner is BRAND JAMES RUTLAND.' }],
+          },
+          { role: 'user', content: 'And its roof?' },
+        ],
+      }),
+    );
+    expect(j).not.toMatch(/BRAND|Who owns/);
+    expect(j).toMatch(/\[earlier message sha256:[0-9a-f]{16}\]/);
+    expect(j).toContain('And its roof?');
+    clearPersonValues();
+    expect(hidePersonFields('Who owns property 103857?')).toBe('Who owns property 103857?');
+  });
+});
+
+describe('review B1: model assumptions are model text', () => {
+  it('checks the assumption lines with the answer and drops all model text on tool_error', async () => {
+    const r = await runTurn(
+      deps([
+        toolCall('t1', 'resolve_search_center', { q: 'Austin' }),
+        toolCall('t2', 'search_properties', searchArgs),
+        text(
+          'OUTCOME: answered\nASSUMPTION: same homes as [[property:114347]] earlier\n\nSee [[property:100]].',
+        ),
+      ]),
+      input(),
+    );
+    if (r.kind !== 'response') throw new Error('expected a response');
+    expect(r.body.outcome).toBe('tool_error');
+    expect(r.body.answer).toBe('');
+    expect(r.body.assumptions.join(' ')).not.toContain('same homes');
+    expect(r.body.assumptions.join(' ')).toContain('AUSTIN');
+    const bare = await runTurn(
+      deps([
+        toolCall('t1', 'resolve_search_center', { q: 'Austin' }),
+        text(
+          'OUTCOME: answered\nASSUMPTION: from the last turn\n\npermit 1981-013092 BP has been open 45 years.',
+        ),
+      ]),
+      input(),
+    );
+    if (bare.kind !== 'response') throw new Error('expected a response');
+    expect(bare.body).toMatchObject({ outcome: 'tool_error', answer: '' });
+    expect(bare.body.assumptions.join(' ')).not.toContain('last turn');
+  });
+  it('strips HTML and images from the answer and the assumptions before returning', async () => {
+    const r = await runTurn(
+      deps([
+        toolCall('t1', 'resolve_search_center', { q: 'Austin' }),
+        toolCall('t2', 'search_properties', searchArgs),
+        text(
+          'OUTCOME: answered\nASSUMPTION: radius <b>5</b> mi\n\nSee [[property:100]] ![x](https://x.example/?d=1) <img src=x>.',
+        ),
+      ]),
+      input(),
+    );
+    if (r.kind !== 'response') throw new Error('expected a response');
+    expect(r.body.answer).toBe('See [[property:100]] .');
+    expect(r.body.assumptions[0]).toBe('radius 5 mi');
+  });
+  it('drops a state suffix from the place name and says so', async () => {
+    let asked = '';
+    const q = {
+      ...stubQueries,
+      searchCenters: async (p: { q: string }) => ((asked = p.q), { items: [AUSTIN] }),
+    } as unknown as Queries;
+    const r = await runTurn(
+      deps(
+        [
+          toolCall('t1', 'resolve_search_center', { q: 'Austin, TX' }),
+          toolCall('t2', 'search_properties', searchArgs),
+          text('OUTCOME: answered\n\nSee [[property:100]].'),
+        ],
+        { queries: async () => q },
+      ),
+      input('Which properties within 5 miles of Austin, TX have roofs older than 15 years?'),
+    );
+    expect(asked).toBe('Austin');
+    if (r.kind !== 'response') throw new Error('expected a response');
+    expect(r.body.outcome).toBe('answered');
+    expect(r.body.assumptions[0]).toBe(
+      'State suffix dropped from the place name: "Austin, TX" → "Austin" (search centers are Travis County names).',
+    );
+    expect(r.body.tool_calls[0]!.args).toMatchObject({ q: 'Austin, TX' });
+  });
+});
+
+describe('review S3: the steps before the turn', () => {
+  const okModel = () =>
+    new MockLanguageModelV4({
+      doGenerate: [text('OUTCOME: out_of_scope\n\nOnly this dataset.')],
+    }) as any;
+  const limits = () => ({ chat: { max_output_tokens: 1500, turn_deadline_seconds: 25 } }) as any;
+  const msg = { messages: [{ role: 'user', content: 'A poem?' }] };
+  it('parses with the frozen ChatResponse schema, also for a stale timeEpoch', async () => {
+    const { h } = handler();
+    const e = event({ messages: [{ role: 'user', content: 'Write a poem' }], session_id: 's-1' });
+    (e.requestContext as any).timeEpoch = 0;
+    const r = (await h(e)) as any;
+    expect(r.statusCode).toBe(200);
+    expect(ChatResponse.safeParse(JSON.parse(r.body)).success).toBe(true);
+    expect(JSON.parse(r.body).outcome).toBe('out_of_scope');
+  });
+  it('a stalled flag read and a failed secret read never fail the turn', async () => {
+    const h = createChatHandler({
+      readFlag: () => new Promise(() => {}),
+      queries: async () => stubQueries,
+      langsmith: langSmithLoader({ LANGSMITH_API_KEY_SECRET_ID: 'x' }, async () => {
+        throw new Error('secrets manager down');
+      }),
+      model: okModel(),
+      modelId: 'm',
+      limits,
+    });
+    const t0 = Date.now();
+    const r = (await h(event(msg))) as any;
+    expect(r.statusCode).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(await within(new Promise(() => {}), 10, 'fallback')).toBe('fallback');
+    expect(await within(Promise.reject(new Error('x')), 1000, null)).toBeNull();
+  });
+  it('releases a half-open probe when the data cannot open, so the instance is not pinned at circuit_open', async () => {
+    let t = 0;
+    const breaker = new CircuitBreaker(1, 30_000, () => t);
+    breaker.failure();
+    let fail = true;
+    const h = createChatHandler({
+      readFlag: async () => 'false',
+      queries: async () => {
+        if (fail) throw new Error('open failed');
+        return stubQueries;
+      },
+      langsmith: async () => ({
+        tracingEnabled: false,
+        ToolLoopAgent,
+        providerOptions: () => ({}),
+        flush: async () => {},
+      }),
+      model: okModel(),
+      modelId: 'm',
+      breaker,
+      limits,
+    });
+    expect(JSON.parse(((await h(event(msg))) as any).body).reason).toBe('circuit_open');
+    t = 31_000;
+    expect(((await h(event(msg))) as any).statusCode).toBe(500);
+    fail = false;
+    expect(((await h(event(msg))) as any).statusCode).toBe(200);
   });
 });

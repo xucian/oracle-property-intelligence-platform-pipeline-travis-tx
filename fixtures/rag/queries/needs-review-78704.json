@@ -43,7 +43,8 @@
             "2014-055628 BP",
             "2025-078943 DS"
           ],
-          "total": 12
+          "total": 12,
+          "computed_by": "query layer"
         }
       }
     }

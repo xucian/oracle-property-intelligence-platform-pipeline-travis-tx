@@ -26,7 +26,8 @@
           "kind": "permit",
           "tool": "search_permits",
           "values": [],
-          "total": 0
+          "total": 0,
+          "computed_by": "query layer"
         }
       }
     }

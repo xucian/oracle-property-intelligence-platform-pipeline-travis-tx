@@ -5,7 +5,13 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from '
 import type { Meta } from '@travis/contract';
 import { DEFAULT_LIMITS, type Queries } from '@travis/query';
 import { CircuitBreaker } from '../chat/governor.js';
-import { clearPersonValues, langSmithLoader, type LangSmithFacade } from '../chat/langsmith.js';
+import {
+  PLAIN_FACADE,
+  clearPersonValues,
+  langSmithLoader,
+  registerHistory,
+  type LangSmithFacade,
+} from '../chat/langsmith.js';
 import { bedrockModel } from '../chat/model.js';
 import { parseChatRequest } from '../chat/request.js';
 import type { ToolCallRecord } from '../chat/tools.js';
@@ -32,7 +38,7 @@ export const readFlagFromSsm: FlagReader = async () => {
   const { SSMClient, GetParameterCommand } = createRequire(import.meta.url)(
     '@aws-sdk/client-ssm',
   ) as typeof import('@aws-sdk/client-ssm');
-  const r = await new SSMClient({}).send(new GetParameterCommand({ Name: name }));
+  const r = await new SSMClient(SDK_CLIENT_OPTIONS).send(new GetParameterCommand({ Name: name }));
   return r.Parameter?.Value ?? null;
 };
 
@@ -77,6 +83,27 @@ export interface ChatHandlerDeps {
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+
+/** Bound of each step before the turn (the flag read, the tracing facade). */
+const PRE_TURN_MS = 1500;
+/** Resolves to `fallback` when `p` takes longer than `ms` or rejects. */
+export async function within<T, F>(p: Promise<T>, ms: number, fallback: F): Promise<T | F> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      p.catch(() => fallback),
+      new Promise<F>((r) => (timer = setTimeout(() => r(fallback), Math.max(0, ms)))),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Short timeouts and one retry for the SDK clients a turn waits on (SSM flag, Secrets Manager key). */
+export const SDK_CLIENT_OPTIONS = {
+  maxAttempts: 2,
+  requestHandler: { connectionTimeout: 1000, requestTimeout: 1000 },
+};
 
 /** Free-text parameters (search words, names, printed numbers) are logged as hashes; ids, numbers and flags as given. */
 const HASHED_PARAMS = new Set(['q', 'number', 'license_number']);
@@ -167,7 +194,9 @@ export function createChatHandler(deps: ChatHandlerDeps) {
   async function http(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyStructuredResultV2> {
     const t0 = performance.now();
     const requestId = event.requestContext.requestId;
-    const receivedAt = event.requestContext.timeEpoch ?? now();
+    // timeEpoch is API Gateway's receipt time; a missing or stale one (a hand-made event) counts as now
+    const te = event.requestContext.timeEpoch;
+    const receivedAt = te && Math.abs(now() - te) < 60_000 ? te : now();
     const reply = (status: number, body: unknown, op: 'ok' | 'client_error' | 'server_error') => {
       observer.record({
         operation: 'agentChat',
@@ -208,36 +237,49 @@ export function createChatHandler(deps: ChatHandlerDeps) {
         'client_error',
       );
     }
-    if ((await deps.readFlag()) === 'true') return unavailable('budget_exhausted');
-    if (!breaker.allow()) return unavailable('circuit_open');
-
     const limits = deps.limits();
-    const [langsmith, q] = await Promise.all([deps.langsmith(), deps.queries()]);
-    const turnDeps: TurnDeps = {
-      queries: deps.queries,
-      meta: () => q.getMeta(),
-      model: deps.model,
-      modelId: deps.modelId,
-      langsmith,
-      limits: {
-        maxOutputTokens: limits.chat.max_output_tokens,
-        turnDeadlineSeconds: limits.chat.turn_deadline_seconds,
-      },
-      logToolCall: (r: ToolCallRecord) =>
-        logger.info('chat tool call', {
-          request_id: requestId,
-          tool_call_id: r.id,
-          tool: r.name,
-          params: logParams(r.args),
-          status: r.status,
-          total: r.total,
-          returned: r.returned,
-          ms: r.ms,
-        }),
-      now,
-      ...deps.turn,
-    };
+    const deadlineAt = receivedAt + limits.chat.turn_deadline_seconds * 1000;
+    // Everything before the turn runs inside the deadline and the try (review S3): the flag, the tracing facade and the
+    // data each get a bound, and the circuit breaker's half-open probe is released whatever happens.
+    let settled = false;
+    let langsmith: LangSmithFacade = PLAIN_FACADE;
     try {
+      const flag = await within(deps.readFlag(), PRE_TURN_MS, null);
+      if (flag === 'true') return unavailable('budget_exhausted');
+      if (!breaker.allow()) {
+        settled = true;
+        return unavailable('circuit_open');
+      }
+      langsmith = await within(deps.langsmith(), PRE_TURN_MS, PLAIN_FACADE);
+      const q = await within(deps.queries(), Math.max(0, deadlineAt - now() - 2000), null);
+      if (!q) throw new Error('the query layer did not open within the turn deadline');
+      // the client-sent history reaches LangSmith only as hashes (review S4)
+      registerHistory(parsed.messages.slice(0, -1).map((m) => m.content));
+      const turnDeps: TurnDeps = {
+        queries: deps.queries,
+        meta: () => q.getMeta(),
+        model: deps.model,
+        modelId: deps.modelId,
+        langsmith,
+        limits: {
+          maxOutputTokens: limits.chat.max_output_tokens,
+          turnDeadlineSeconds: limits.chat.turn_deadline_seconds,
+        },
+        links: { apiHost: event.requestContext.domainName },
+        logToolCall: (r: ToolCallRecord) =>
+          logger.info('chat tool call', {
+            request_id: requestId,
+            tool_call_id: r.id,
+            tool: r.name,
+            params: logParams(r.args),
+            status: r.status,
+            total: r.total,
+            returned: r.returned,
+            ms: r.ms,
+          }),
+        now,
+        ...deps.turn,
+      };
       const result = await runTurn(turnDeps, {
         messages: parsed.messages,
         sessionId: parsed.sessionId,
@@ -247,9 +289,8 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       emitTurn(result.stats, requestId, parsed.sessionId, deps.modelId);
       deps.onTurn?.(result.stats, requestId);
       // flush the traces inside the turn's deadline, keeping half a second to answer
-      const flushMs = receivedAt + limits.chat.turn_deadline_seconds * 1000 - now() - 500;
-      await langsmith.flush(Math.min(2000, flushMs));
-      clearPersonValues();
+      await langsmith.flush(Math.min(2000, deadlineAt - now() - 500));
+      settled = true;
       if (result.kind === 'model_unavailable') {
         breaker.success();
         return unavailable('model_unavailable');
@@ -259,9 +300,12 @@ export function createChatHandler(deps: ChatHandlerDeps) {
       return reply(200, result.body, 'ok');
     } catch (e) {
       observer.error('chat turn failed', e, requestId);
-      await langsmith.flush(500);
-      clearPersonValues();
+      await langsmith.flush(Math.min(500, deadlineAt - now() - 500));
       return reply(500, { error: 'internal_error', request_id: requestId }, 'server_error');
+    } finally {
+      clearPersonValues();
+      // a turn that ended before reporting success or failure must not leave a half-open probe pinned
+      if (!settled) breaker.release();
     }
   }
 

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiProvider } from '../src/api.js';
 import { hashOnMainThread } from '../src/lib/hash.js';
 import type { SqlEngine } from '../src/lib/duckdb.js';
-import { Agent, README_PROMPTS } from '../src/screens/Agent.js';
+import { Agent, README_PROMPTS, prewarmDue } from '../src/screens/Agent.js';
 import { Manifest } from '../src/screens/Manifest.js';
 import { Mcp } from '../src/screens/Mcp.js';
 import { QueryLayer } from '../src/screens/QueryLayer.js';
@@ -279,7 +279,17 @@ describe('Agent panel', () => {
     expect(note.textContent).toContain('fixture-request');
   });
 
+  it('prewarms at most once per 5 minutes', () => {
+    const t = Date.now() + 3_600_000;
+    expect(prewarmDue(t)).toBe(true);
+    expect(prewarmDue(t + 60_000)).toBe(false);
+    expect(prewarmDue(t + 5 * 60_000 + 1)).toBe(true);
+  });
+
   it('prewarms with one request the contract rejects, then renders the answer, citations, evidence and outcome', async () => {
+    sessionStorage.clear();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 7_200_000);
     const bodies: string[] = [];
     const mock = mockApi({
       '/v1/agent/chat': (_url, init) => {
@@ -328,6 +338,7 @@ describe('Agent panel', () => {
     expect(screen.getByText(/model us\.anthropic\.claude-sonnet-4-6/)).toBeTruthy();
     // the second README prompt is offered next
     expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe(README_PROMPTS[1]);
+    vi.useRealTimers();
   });
 });
 

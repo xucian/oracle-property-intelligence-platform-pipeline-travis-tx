@@ -189,6 +189,10 @@ export class CircuitBreaker {
     this.openedAt = null;
     this.probing = false;
   }
+  /** Ends a probe that reported neither success nor failure (the turn failed before or outside the model). */
+  release(): void {
+    this.probing = false;
+  }
   failure(): void {
     this.failures++;
     this.probing = false;

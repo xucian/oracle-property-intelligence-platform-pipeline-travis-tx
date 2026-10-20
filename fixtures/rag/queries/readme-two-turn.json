@@ -1,6 +1,6 @@
 {
   "id": "readme-two-turn",
-  "description": "README.md's two agent prompts as one conversation, with Austin as the city.",
+  "description": "README.md's two agent prompts as one conversation, with Austin as the city. Expected ids from independent SQL.",
   "turns": [
     {
       "user": "Which properties in Travis County within five miles of Austin have roofs older than 15 years?",
@@ -49,7 +49,8 @@
             "103369",
             "136312"
           ],
-          "total": 50260
+          "total": 50260,
+          "computed_by": "independent SQL over the serving Parquet files"
         }
       }
     },
@@ -101,7 +102,8 @@
             "2013-111211 BP",
             "2014-018219 BP"
           ],
-          "total": 139
+          "total": 139,
+          "computed_by": "independent SQL over the serving Parquet files"
         }
       }
     }

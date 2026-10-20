@@ -50,6 +50,18 @@ export interface TurnTools {
   records: ToolCallRecord[];
   /** The search centers whose coordinates a search used (their basis goes into `assumptions`). */
   usedCenters: CenterPoint[];
+  /** Server assumptions the tools add (a state suffix dropped from a place name). */
+  notes: string[];
+}
+
+/**
+ * Drops a trailing Texas suffix from a place name ("Pflugerville, TX", "Austin Texas"): search centers are the roll's
+ * situs names, which never carry the state, so "Austin, TX" would otherwise match a one-parcel "AUSTIN TX" or nothing.
+ * The agent's wrapper only: the shared REST and MCP lookup keeps the contract's matching.
+ */
+export function stripStateSuffix(q: string): string {
+  const m = /^(.*?[^\s,])\s*(?:,\s*|\s+)(?:tx|texas)\.?\s*$/i.exec(q.trim());
+  return m ? m[1]! : q;
 }
 
 export interface TurnToolsOptions {
@@ -71,6 +83,7 @@ export interface TurnToolsOptions {
 export function buildTurnTools(o: TurnToolsOptions): TurnTools {
   const records: ToolCallRecord[] = [];
   const usedCenters: CenterPoint[] = [];
+  const notes: string[] = [];
   const tools: ToolSet = {};
   for (const def of TOOLS.filter((t) => t.agent)) {
     const run = RUN[def.name];
@@ -109,6 +122,15 @@ export function buildTurnTools(o: TurnToolsOptions): TurnTools {
           }
           if (g.center) usedCenters.push(g.center);
         }
+        let query = input;
+        if (def.name === 'resolve_search_center' && typeof input?.q === 'string') {
+          const stripped = stripStateSuffix(input.q);
+          if (stripped !== input.q) {
+            query = { ...input, q: stripped };
+            const note = `State suffix dropped from the place name: "${input.q}" → "${stripped}" (search centers are Travis County names).`;
+            if (!notes.includes(note)) notes.push(note);
+          }
+        }
         const budget = o.remainingMs();
         if (budget <= 0) {
           rec('timeout', 'the turn deadline was reached before the query ran');
@@ -118,7 +140,7 @@ export function buildTurnTools(o: TurnToolsOptions): TurnTools {
         try {
           const q = await o.queries();
           const out: any = await Promise.race([
-            run(q, input),
+            run(q, query),
             new Promise((_, reject) => {
               timer = setTimeout(() => reject(new ToolTimeout()), budget);
             }),
@@ -145,7 +167,7 @@ export function buildTurnTools(o: TurnToolsOptions): TurnTools {
       },
     });
   }
-  return { tools, records, usedCenters };
+  return { tools, records, usedCenters, notes };
 }
 
 class ToolTimeout extends Error {

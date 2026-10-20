@@ -77,6 +77,27 @@ const evidenceId = (e: Evidence): { kind: string; id: string } | null => {
   return id ? { kind: e.kind, id } : null;
 };
 
+const PREWARM_KEY = 'travis-agent-prewarm-at';
+const PREWARM_EVERY_MS = 5 * 60_000;
+let lastPrewarm = 0;
+/** True at most once per 5 minutes (sessionStorage when available, else this page's memory); records the time. */
+export function prewarmDue(now = Date.now()): boolean {
+  let last = lastPrewarm;
+  try {
+    last = Math.max(last, Number(sessionStorage.getItem(PREWARM_KEY) ?? 0) || 0);
+  } catch {
+    /* storage unavailable: the module-level time still applies */
+  }
+  if (now - last < PREWARM_EVERY_MS) return false;
+  lastPrewarm = now;
+  try {
+    sessionStorage.setItem(PREWARM_KEY, String(now));
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
 const newSession = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(36).padStart(2, '0'))
     .join('')
@@ -215,9 +236,10 @@ export function Agent() {
   const session = useRef(newSession());
 
   // Prewarm: a request the contract rejects (400) opens the chat function before the first question, at no model cost
-  // (decisions.md section 32). Once per page load.
+  // (decisions.md section 32). At most once per 5 minutes per browser session: each one counts toward the daily
+  // invocation limit that sets the kill switch.
   useEffect(() => {
-    void api.agentChat({ messages: [] }).catch(() => undefined);
+    if (prewarmDue()) void api.agentChat({ messages: [] }).catch(() => undefined);
   }, [api]);
 
   useEffect(() => {

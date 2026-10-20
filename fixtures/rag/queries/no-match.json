@@ -28,7 +28,8 @@
           "kind": "property",
           "tool": "search_properties",
           "values": [],
-          "total": 0
+          "total": 0,
+          "computed_by": "query layer"
         }
       }
     }
