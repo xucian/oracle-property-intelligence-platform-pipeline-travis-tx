@@ -1,0 +1,111 @@
+{
+  "id": "readme-two-turn",
+  "description": "README.md's two agent prompts as one conversation, with Austin as the city.",
+  "turns": [
+    {
+      "user": "Which properties in Travis County within five miles of Austin have roofs older than 15 years?",
+      "expected": {
+        "outcomes": ["answered"],
+        "tools": [
+          {
+            "name": "resolve_search_center",
+            "args": {
+              "q": "Austin"
+            }
+          },
+          {
+            "name": "search_properties",
+            "args": {
+              "lat": 30.291378194234046,
+              "lon": -97.77740571657456,
+              "radius_miles": 5,
+              "roof_age_min": 15,
+              "open_permits": false
+            }
+          }
+        ],
+        "ids": {
+          "kind": "property",
+          "tool": "search_properties",
+          "values": [
+            "103857",
+            "215724",
+            "205334",
+            "188323",
+            "114347",
+            "375274",
+            "423039",
+            "282855",
+            "115820",
+            "509072",
+            "221695",
+            "701941",
+            "827074",
+            "229636",
+            "374571",
+            "190930",
+            "423101",
+            "116819",
+            "103369",
+            "136312"
+          ],
+          "total": 50260
+        }
+      }
+    },
+    {
+      "user": "Which properties near that area have open roofing permits that have been open for many years, and who is the listed contractor?",
+      "expected": {
+        "outcomes": ["answered"],
+        "tools": [
+          {
+            "name": "resolve_search_center",
+            "args": {
+              "q": "Austin"
+            }
+          },
+          {
+            "name": "search_permits",
+            "args": {
+              "lat": 30.291378194234046,
+              "lon": -97.77740571657456,
+              "radius_miles": 5,
+              "min_open_years": {
+                "$in": [5, 10]
+              }
+            }
+          }
+        ],
+        "ids": {
+          "kind": "permit",
+          "tool": "search_permits",
+          "values": [
+            "1981-013092 BP",
+            "1981-016372 BP",
+            "1983-011964 BP",
+            "1987-006022 BP",
+            "1989-010586 BP",
+            "1989-000883 BP",
+            "1991-008206 BP",
+            "1997-013399 BP",
+            "1997-006562 BP",
+            "1999-003898 BP",
+            "2000-004161 BP",
+            "2000-007083 BP",
+            "2003-007346 BP",
+            "2004-002668 BP",
+            "2005-021228 BP",
+            "2006-014253 BP",
+            "2008-060821 BP",
+            "2009-119822 BP",
+            "2013-111211 BP",
+            "2014-018219 BP"
+          ],
+          "total": 139
+        }
+      }
+    }
+  ],
+  "computed_on": "deploy e17c90aa0b91ccae",
+  "built_at": "2026-10-20"
+}
