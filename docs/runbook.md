@@ -646,14 +646,22 @@ after the pause says `"reason":"budget_exhausted"`; both log counts are at least
 
 ### Check 3: the explorer on the live URL
 
-Open `ExplorerUrl` (from `deploy-web`, or `aws cloudformation describe-stacks --stack-name TravisWeb --region us-east-2`)
-and walk README.md's demo steps 1-7 in its tabs: the run summary and records by source; the query layer, running one
-preset SQL query; the manifest; **Verify** on one table part and one directory root; run history; then a search
-around central Austin (5 miles, roofs older than 15 years) and the open roofing permits.
+Open `ExplorerUrl` (from `deploy-web`, or `aws cloudformation describe-stacks --stack-name TravisWeb --region us-east-2`).
+Its tabs follow README.md's "Demo Transcript" (the unnumbered "Presenter:" lines after the opening one), in order:
 
-Pass: every tab shows Travis records; the SQL query returns rows (a DuckDB-WASM range read from the mirror); Verify shows
-`match` on `ipfs.filebase.io` and on `gateway.pinata.cloud` (`unverified` on Pinata means its hourly quota is spent: try
-again after the hour, never a pass by default).
+| Tab | The README's line | Pass |
+| --- | --- | --- |
+| 1 Run summary | "opening the pipeline run summary" | run `20261018T143520Z-t5-full`; 441,939 properties, 1,986,484 permits |
+| 2 Records by source | "total uploaded records by source" | one row per source, with counts |
+| 3 Query layer | "the DuckDB-backed query layer" | one preset SQL query returns rows (DuckDB-WASM reading the mirror) |
+| 4 Manifest | "the published artifact manifest for this run" | manifest `bafybeid6jqq…` with its objects |
+| 5 Verify | "retrieve one published artifact by CID from a public gateway … then … a second" | one table part and one directory root: `match` on `ipfs.filebase.io` and on `gateway.pinata.cloud` |
+| 6 Run history | "a later incremental publish produced a new CID" | the published runs listed (run 2's new CID comes with T10) |
+| 7-8 Lead queries | "properties within a sample radius … older than 15 years"; "open roofing permits … open for many years, including contractor and BBB rating" | central Austin, 5 miles: aged-roof properties listed; open roofing permits, longest open first, with the printed contractor and BBB shown as blocked |
+
+The Agent tab is T9 (its route answers `503` until then); the MCP tab shows the endpoint. `unverified` on Pinata means
+its hourly quota is spent: try again after the hour, never a pass by default. The first call after a quiet period can
+take a few seconds; the loading text then says so (decisions.md section 31).
 
 <details><summary>Teardown (after the evaluation only)</summary>
 
