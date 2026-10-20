@@ -1,6 +1,6 @@
 name: PR checks
 
-# Verification only: no AWS credentials, no deploys, no secrets. Deploys are run by the operator (docs/deploy-t7-t8.md).
+# Verification only: no AWS credentials, no deploys, no secrets. Deploys are run by the operator (docs/runbook.md section 9).
 on:
   pull_request:
   workflow_dispatch:

@@ -21,16 +21,16 @@ export const ConfigSchema = z.object({
   bedrockFoundationModelId: z.string().min(1).optional(),
   memoryMb: z
     .object({
-      api: z.number().int().min(512).max(10240).default(2048),
-      chat: z.number().int().min(512).max(10240).default(2048),
+      api: z.number().int().min(512).max(10240).default(4096),
+      chat: z.number().int().min(512).max(10240).default(4096),
     })
-    .default({ api: 2048, chat: 2048 }),
+    .default({ api: 4096, chat: 4096 }),
   duckdb: z
     .object({
-      memoryLimit: z.string().default('1GB'),
+      memoryLimit: z.string().default('3GB'),
       threads: z.number().int().min(1).max(6).default(2),
     })
-    .default({ memoryLimit: '1GB', threads: 2 }),
+    .default({ memoryLimit: '3GB', threads: 2 }),
   /** 0 = unreserved. Set R > 0 only after reading `aws lambda get-account-settings` (section 21, Concurrency). */
   chatReservedConcurrency: z.number().int().min(0).max(5).default(0),
   throttle: z.object({

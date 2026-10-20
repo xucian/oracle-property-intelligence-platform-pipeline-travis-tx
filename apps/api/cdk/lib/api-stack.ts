@@ -455,6 +455,9 @@ export class TravisApi extends Stack {
     new CfnOutput(this, 'ApiFunctionName', { value: apiFn.functionName });
     new CfnOutput(this, 'ChatFunctionName', { value: chatFn.functionName });
     new CfnOutput(this, 'DeployBucketName', { value: deployBucket.bucketName });
+    new CfnOutput(this, 'AccessLogGroupName', { value: accessLogs.logGroupName });
+    new CfnOutput(this, 'ApiLogGroupName', { value: apiLogs.logGroupName });
+    new CfnOutput(this, 'ChatLogGroupName', { value: chatLogs.logGroupName });
 
     pinLambdaLogGroups(this);
   }

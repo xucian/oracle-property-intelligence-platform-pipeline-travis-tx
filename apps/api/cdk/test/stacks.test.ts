@@ -113,7 +113,7 @@ describe('TravisApi stack', () => {
         Variables: Match.objectLike({
           DUCKDB_PATH: '/opt/db/travis.duckdb',
           DUCKDB_EXTENSION_DIR: '/opt/duckdb_extensions',
-          DUCKDB_MEMORY_LIMIT: '1GB',
+          DUCKDB_MEMORY_LIMIT: '3GB',
           DUCKDB_THREADS: '2',
           POWERTOOLS_SERVICE_NAME: 'travis-api',
           POWERTOOLS_METRICS_NAMESPACE: 'TravisPropertyIntelligence',

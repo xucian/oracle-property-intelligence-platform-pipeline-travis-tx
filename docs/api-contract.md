@@ -631,7 +631,7 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
   tables CAR's are not in the run record; the manifest carries every CAR's size and SHA-256). The server maps a `window`
   entry without bounds to `from`/`to` null, and a free-text `limitations[].records_request` to null with its text in
   `detail`. A permit that prints no contractor company, name or phone has `contractor: null` (805,332 of the published
-  permits in run 1), never a shared blank attribution key; `/v1/meta.counts.permits_without_contractor` counts them. No
+  permits in run 1), never a shared blank attribution key; a `/v1/meta` limitation (`no_contractor_printed`) gives the count. No
   other field changes.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.

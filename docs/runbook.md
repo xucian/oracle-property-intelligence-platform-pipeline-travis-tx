@@ -557,3 +557,92 @@ Then say "T6 approved".
 4. For example, at 23:05Z: `{"gateway":"https://gateway.pinata.cloud","running":true,"finished":false,"jobs":3286,"match":277,"mismatch":0,"unverified":14,"remaining":3009,"last_row_at":"2026-10-19T23:02:14.959Z"}`
 
 </details>
+
+## 9. T7 and T8 — hosted query layer and explorer (built together, checked once)
+
+Built offline on 2026-10-20 (decisions.md section 29). The DuckDB file is already built: `data/deploy/current` →
+deploy `e17c90aa0b91ccae`, 4.04 GB, from commit `e462172`, reconciled with T5 (441,939 properties, 1,986,484 permits
+on 237,531 parcels, roof age on 390,212). `npm run build-db -w @travis/deploy-build` rebuilds it (about 5 minutes, 16 GB
+peak memory) and skips the build when its inputs are unchanged. Everything below is run by the operator from the repository root.
+`PROFILE` is the AWS profile, `ACCOUNT` its 12-digit id.
+
+### Setup (once)
+
+```zsh
+export PATH="/opt/homebrew/bin:$PATH" AWS_PROFILE=PROFILE
+brew install just
+colima start --arch aarch64 --cpu 4 --memory 8 --disk 60
+aws cloudformation describe-stacks --stack-name CDKToolkit --region us-east-2 --query 'Stacks[0].StackStatus' --output text
+cp apps/api/cdk/config.example.json apps/api/cdk/config.json
+```
+
+If the fourth command says the stack does not exist: `npx --prefix apps/api/cdk cdk bootstrap aws://ACCOUNT/us-east-2`.
+In `apps/api/cdk/config.json` (gitignored) set `account` and `alarmEmails`; keep `chatReservedConcurrency` at `0` (the
+chat route is a placeholder until T9).
+
+### Deploy
+
+```zsh
+PUPPETEER_SKIP_DOWNLOAD=1 npm ci
+just deploy-api
+```
+
+The first `deploy-api` pushes an image of about 4.5 GB to ECR, so it can take 10-30 minutes; CDK asks once to approve the
+IAM changes. Confirm the SNS subscription email. Then run check 1 at once, while both functions are still cold, and
+afterwards:
+
+```zsh
+just build-explorer deploy-web mirror
+npm run stage-inputs -w @travis/deploy-build -- --bucket "$(aws cloudformation describe-stacks --stack-name TravisApi --region us-east-2 --query "Stacks[0].Outputs[?OutputKey=='DeployBucketName'].OutputValue" --output text)"
+```
+
+`deploy-web` creates CloudFront (about 5-10 minutes) and prints `ExplorerUrl`; `mirror` uploads the 2,929 table parts
+(about 1.4 GB, each with the manifest's SHA-256 as its S3 checksum; re-running skips what is there).
+
+### Check 1: the API, MCP and cold starts
+
+```zsh
+out() { aws cloudformation describe-stacks --stack-name TravisApi --region us-east-2 --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+API_BASE=$(out ApiBase); echo "$API_BASE"
+curl -s -o /dev/null -w 'meta %{http_code} %{time_total}s\n' "$API_BASE/v1/meta"
+curl -s -o /dev/null -w 'chat %{http_code} %{time_total}s\n' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'
+curl -s "$API_BASE/v1/openapi.json" | shasum -a 256; shasum -a 256 packages/contract/openapi.json
+curl -s -X POST "$API_BASE/v1/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-06-18' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_properties","arguments":{"lat":30.2672,"lon":-97.7431,"radius_miles":1,"roof_age_min":15,"open_permits":false,"limit":2}}}' | head -c 900; echo
+```
+
+Pass: `meta 200` and `chat 503`, each first (cold) request under 25 s (keep both times for the PR); the two SHA-256
+lines equal; the MCP answer has `structuredContent` with two properties and no `isError`.
+
+### Check 2: throttle, alarm, kill switch and the log trace
+
+```zsh
+for i in 1 2 3 4 5 6 7 8; do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; done; echo
+aws cloudwatch set-alarm-state --region us-east-2 --alarm-name travis-chat-daily-usage --state-value ALARM --state-reason 'T7 check'
+sleep 90
+curl -s -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; echo
+aws ssm put-parameter --region us-east-2 --name /travis/chat/budget-exhausted --value false --type String --overwrite >/dev/null
+RID=$(curl -s -D - -o /dev/null "$API_BASE/v1/meta" | awk 'tolower($1)=="apigw-requestid:"{print $2}' | tr -d '\r'); echo "$RID"
+sleep 60
+for g in AccessLogGroupName ApiLogGroupName; do aws logs filter-log-events --region us-east-2 --log-group-name "$(out $g)" --filter-pattern "\"$RID\"" --query 'length(events)'; done
+```
+
+Pass: at least one `429` among the eight codes; an alarm email for `travis-chat-daily-usage` arrives; the chat answer
+after the pause says `"reason":"budget_exhausted"`; both log counts are at least 1.
+
+### Check 3: the explorer on the live URL
+
+Open `ExplorerUrl` (from `deploy-web`, or `aws cloudformation describe-stacks --stack-name TravisWeb --region us-east-2`)
+and walk README.md's demo steps 1-7 in its tabs: the run summary and records by source; the query layer, running one
+preset SQL query; the manifest; **Verify** on one table part and one directory root; run history; then a search
+around central Austin (5 miles, roofs older than 15 years) and the open roofing permits.
+
+Pass: every tab shows Travis records; the SQL query returns rows (a DuckDB-WASM range read from the mirror); Verify shows
+`match` on `ipfs.filebase.io` and on `gateway.pinata.cloud` (`unverified` on Pinata means its hourly quota is spent: try
+again after the hour, never a pass by default).
+
+<details><summary>Teardown (after the evaluation only)</summary>
+
+Disable termination protection on both stacks, then `npx --prefix apps/api/cdk cdk destroy TravisApi TravisWeb` and
+`npx --prefix apps/api/cdk cdk gc`. The buckets, image and log groups go; IPFS keeps the published bytes.
+
+</details>
