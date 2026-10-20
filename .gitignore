@@ -9,3 +9,7 @@ oracle/travis/runs/
 data/
 *.log
 *.DS_Store
+dist/
+cdk.out/
+.turbo/
+*.tsbuildinfo
