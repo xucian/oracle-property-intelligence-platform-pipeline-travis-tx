@@ -13,3 +13,5 @@ dist/
 cdk.out/
 .turbo/
 *.tsbuildinfo
+apps/api/cdk/config.json
+apps/api/build/
