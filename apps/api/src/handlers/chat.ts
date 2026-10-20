@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { createObservability } from '../observability.js';
 
@@ -12,7 +13,10 @@ export type FlagReader = () => Promise<string | null>;
 export const readFlagFromSsm: FlagReader = async () => {
   const name = process.env.CHAT_FLAG_PARAM;
   if (!name) return null;
-  const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm');
+  // createRequire, not import(): ESM resolution ignores NODE_PATH, which is how the Lambda base image exposes its bundled SDK
+  const { SSMClient, GetParameterCommand } = createRequire(import.meta.url)(
+    '@aws-sdk/client-ssm',
+  ) as typeof import('@aws-sdk/client-ssm');
   const r = await new SSMClient({}).send(new GetParameterCommand({ Name: name }));
   return r.Parameter?.Value ?? null;
 };
