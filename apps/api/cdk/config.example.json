@@ -4,8 +4,8 @@
   "region": "us-east-2",
   "bedrockModelId": "us.anthropic.claude-opus-5-5",
   "bedrockRoutingRegions": ["us-east-1", "us-east-2", "us-west-2"],
-  "memoryMb": { "api": 4096, "chat": 4096 },
-  "duckdb": { "memoryLimit": "3GB", "threads": 2 },
+  "memoryMb": { "api": 3008, "chat": 3008 },
+  "duckdb": { "memoryLimit": "2GB", "threads": 2 },
   "chatReservedConcurrency": 0,
   "throttle": {
     "stage": { "rate": 20, "burst": 40 },

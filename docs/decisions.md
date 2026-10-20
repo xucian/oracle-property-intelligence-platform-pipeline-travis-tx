@@ -1908,3 +1908,8 @@ Pinata call). The full verification ran (read-only) and its byte total is record
   and mailing text from the receipted TCAD capture (each shard's `seed.csv`), labelled `unpublished_source`, beside the
   published address CID. Whether the archive blocks hold the text and only the tables export drops it is a question for
   the oracle before run 2 (T10); it does not block T7.
+- **Both functions run at 3008 MB, DuckDB at 2 GB** (was 4096 MB and 3 GB). The first deploy failed on account
+  561303652468's Lambda quotas: at most 3008 MB per function and 10 concurrent executions in total. 3008 MB works without
+  a quota request, so check 1's cold-start times are measured at 3008 MB. Raising the memory needs a quota increase
+  (Service Quotas, Lambda). The 10-execution cap also leaves no room for T9's reserved chat concurrency, because AWS keeps
+  10 unreserved, so T9 needs that increase too.
