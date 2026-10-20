@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiProvider } from '../src/api.js';
 import { hashOnMainThread } from '../src/lib/hash.js';
 import type { SqlEngine } from '../src/lib/duckdb.js';
-import { Agent } from '../src/screens/Agent.js';
+import { Agent, README_PROMPTS } from '../src/screens/Agent.js';
 import { Manifest } from '../src/screens/Manifest.js';
 import { Mcp } from '../src/screens/Mcp.js';
 import { QueryLayer } from '../src/screens/QueryLayer.js';
@@ -221,14 +221,113 @@ describe('Lead queries (demo steps 7 and 8)', () => {
   });
 });
 
+const chatReply = {
+  outcome: 'answered',
+  answer:
+    'Two properties match.\n\n- [[property:103857]] 802 Barton Blvd, roof age 18 yrs (new_construction, medium)\n- [[permit:2026-102216 EP]] by [[contractor:753edd3a65737a59cf613e4100de8f49]] <img src=x onerror=alert(1)> ![x](https://evil.example/a.png) [bad](https://evil.example) [ok](https://ipfs.filebase.io/ipfs/bafy)',
+  assumptions: ['Search center AUSTIN (city, exact match): centroid of 124,832 parcels'],
+  tool_calls: [
+    {
+      id: 't1',
+      name: 'search_properties',
+      args: { lat: 30.29 },
+      status: 'ok',
+      total: 2,
+      returned: 2,
+      result_summary: '2 matches, 2 returned',
+    },
+  ],
+  evidence: [
+    {
+      kind: 'property',
+      tool_call_id: 't1',
+      property_id: '103857',
+      permit_id: null,
+      contractor_attribution_key: null,
+      business_record_id: null,
+      license_record_id: null,
+      record_cid: MANIFEST_CID,
+      source: {},
+      unpublished_source: null,
+    },
+  ],
+  limitations: [
+    {
+      source: 'bbb.org',
+      availability: 'unsupported',
+      source_access_status: 'blocked',
+      incomplete_reason: 'http_403_source_block',
+      detail: 'BBB blocked',
+      evidence: null,
+      records_request: null,
+    },
+  ],
+  run_id: RUN_ID,
+  manifest_cid: MANIFEST_CID,
+  model_id: 'us.anthropic.claude-sonnet-4-6',
+  prompt_version: 'staraptor-agent.prompt.test',
+  request_id: 'req-1',
+};
+
 describe('Agent panel', () => {
-  it('shows the API 503 agent_unavailable message until T9', async () => {
+  it('keeps the 503 agent_unavailable message', async () => {
     renderWithApi(<Agent />);
     fireEvent.click(screen.getByText('Ask the agent'));
     const note = await screen.findByTestId('agent-unavailable');
     expect(note.textContent).toContain('agent_unavailable');
-    expect(note.textContent).toContain('the model is not enabled yet');
+    expect(note.textContent).toContain('the model is not available');
     expect(note.textContent).toContain('fixture-request');
+  });
+
+  it('prewarms with one request the contract rejects, then renders the answer, citations, evidence and outcome', async () => {
+    const bodies: string[] = [];
+    const mock = mockApi({
+      '/v1/agent/chat': (_url, init) => {
+        const body = String(init?.body ?? '');
+        bodies.push(body);
+        if (JSON.parse(body).messages.length === 0)
+          return new Response(
+            JSON.stringify({ error: 'invalid_params', detail: 'x', request_id: 'r0' }),
+            {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        return new Response(JSON.stringify(chatReply), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+    const { container } = renderWithApi(<Agent />, mock);
+    await waitFor(() => expect(bodies.length).toBe(1));
+    expect(JSON.parse(bodies[0]!)).toEqual({ messages: [] });
+    fireEvent.click(screen.getByText('Ask the agent'));
+    expect(await screen.findByTestId('agent-reply')).toBeTruthy();
+    expect(screen.getByTestId('agent-outcome').textContent).toBe('answered');
+    const sent = JSON.parse(bodies[1]!);
+    expect(sent.messages).toEqual([{ role: 'user', content: README_PROMPTS[0] }]);
+    expect(sent.session_id).toMatch(/^[a-z0-9]{1,64}$/);
+    const chips = screen.getAllByTestId('citation');
+    expect(chips.map((c) => c.getAttribute('href'))).toEqual(
+      expect.arrayContaining([
+        'https://api.example/v1/properties/103857',
+        'https://api.example/v1/permits/2026-102216%20EP',
+        'https://api.example/v1/contractors/753edd3a65737a59cf613e4100de8f49',
+      ]),
+    );
+    // no HTML, no images, no links outside the API, the explorer and the two gateways
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;'); // shown as text, never parsed
+    const hrefs = [...container.querySelectorAll('.answer a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).not.toContain('https://evil.example');
+    expect(hrefs).toContain('https://ipfs.filebase.io/ipfs/bafy');
+    expect(screen.getByTestId('agent-evidence').textContent).toContain('103857');
+    expect(screen.getByText(/centroid of 124,832 parcels/)).toBeTruthy();
+    expect(screen.getByText(/http_403_source_block/)).toBeTruthy();
+    expect(screen.getByText(/model us\.anthropic\.claude-sonnet-4-6/)).toBeTruthy();
+    // the second README prompt is offered next
+    expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe(README_PROMPTS[1]);
   });
 });
 

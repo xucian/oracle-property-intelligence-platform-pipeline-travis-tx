@@ -273,6 +273,38 @@ button {
 .turn.user {
   color: var(--accent);
 }
+.reply h3 {
+  font-size: 0.9rem;
+  margin: 12px 0 4px;
+}
+.answer p,
+.answer ul,
+.answer ol {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.chip {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.evidence {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.tool-calls {
+  padding-left: 18px;
+}
+.tool-calls pre {
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 @media (max-width: 640px) {
   .app {
     padding: 0 8px 32px;
