@@ -628,6 +628,7 @@ lines equal; the MCP answer has `structuredContent` with two properties and no `
 
 ```zsh
 for i in $(seq 30); do curl -s -o /dev/null -w '%{http_code} ' -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}' & done; wait; echo
+aws sns list-subscriptions-by-topic --region us-east-2 --topic-arn "$(aws cloudformation describe-stack-resources --region us-east-2 --stack-name TravisApi --query "StackResources[?ResourceType=='AWS::SNS::Topic'].PhysicalResourceId" --output text)" --query 'Subscriptions[?Protocol==`email`].SubscriptionArn' --output text
 aws cloudwatch set-alarm-state --region us-east-2 --alarm-name travis-chat-daily-usage --state-value ALARM --state-reason 'T7 check'
 sleep 90
 curl -s -X POST "$API_BASE/v1/agent/chat" -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'; echo
@@ -637,7 +638,9 @@ sleep 60
 for g in AccessLogGroupName ApiLogGroupName; do aws logs filter-log-events --region us-east-2 --log-group-name "$(out $g)" --filter-pattern "\"$RID\"" --query 'length(events)'; done
 ```
 
-Pass: at least one `429` among the 30 codes (sent at once; eight were not enough on 2026-10-20, when 2 of 30 came back
+Pass: the subscription line prints an ARN, not `PendingConfirmation` (an unconfirmed subscription gets no email: on
+2026-10-20 the confirmation had gone unnoticed; `aws sns subscribe` with the same address re-sends it); at least one
+`429` among the 30 codes (sent at once; eight were not enough on 2026-10-20, when 2 of 30 came back
 `429`: from a distant client the requests arrive spread out, and the 1-per-second rate with a burst of 3 absorbs them); an alarm email for `travis-chat-daily-usage` arrives; the chat answer
 after the pause says `"reason":"budget_exhausted"`; both log counts are at least 1.
 
