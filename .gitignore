@@ -15,3 +15,5 @@ cdk.out/
 *.tsbuildinfo
 apps/api/cdk/config.json
 apps/api/build/
+!apps/explorer/test/fixtures/*.parquet
+.claude/worktrees/
