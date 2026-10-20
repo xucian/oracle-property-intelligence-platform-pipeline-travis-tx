@@ -1887,3 +1887,24 @@ Pinata call). The full verification ran (read-only) and its byte total is record
      (with the manifest's) run detached from 22:59:43Z (pid 19109, `caffeinate`, log
      `data/travis/publish/20261018T143520Z-t5-full/gateway-checks-pinata.log`), about 250 an hour, so about 12 h. The
      publication record: `runs/20261018T143520Z-t5-full.publication.json` (also kit `docs/evidence/`).
+
+## 29. 2026-10-20: T7 and T8 built together; build rulings
+
+- **T7 and T8 are built together and checked once**, the operator's one exception to stop-per-increment
+  (`docs/tmp-token-budget.md` point 4). T9 and T10 keep stop-per-increment.
+- **npm workspaces + Turborepo, not pnpm** (section 21's layout otherwise unchanged): the root `package-lock.json` pins
+  `@elephant-xyz/cli` 1.58.1 at `44bb182`, which a package-manager switch would re-resolve. The fixed interface points
+  are in `docs/hosted-layer-interfaces.md`.
+- **The chat route ships at T7 as a placeholder**: `503 agent_unavailable` (`model_unavailable`, or `budget_exhausted`
+  when the kill switch is set), no Bedrock call. The route, its throttle, the kill switch and the alarms are checked at T7;
+  T9 replaces the handler.
+- **Alarms notify by email only** (section 8's documented substitution; README.md does not ask for paging). Section 21's
+  PagerDuty subscriber is not wired; the PR records the substitution.
+- **Explorer Verify gateways are `ipfs.filebase.io` and `gateway.pinata.cloud`**, the two section 28 ruled for T6
+  (`ipfs.io` and `dweb.link` stopped serving backend clients; section 9's names are superseded). T8 confirms both
+  gateways' CORS from the live origin.
+- **Finding: the published `address` tables carry no address text.** `export-tables` wrote only `cid`,
+  `property_cid`, `data_group_cid` and `request_identifier` for `address` (checked on shard s0001). The API serves situs
+  and mailing text from the receipted TCAD capture (each shard's `seed.csv`), labelled `unpublished_source`, beside the
+  published address CID. Whether the archive blocks hold the text and only the tables export drops it is a question for
+  the oracle before run 2 (T10); it does not block T7.

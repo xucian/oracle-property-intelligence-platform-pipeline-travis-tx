@@ -53,3 +53,24 @@ Tests that need it use `describe.skipIf(!fixtureExists())` from `@travis/query` 
 
 `TravisApi` (both functions from one arm64 container image with the DuckDB file baked in, the HTTP API, alarms, deploy bucket) and `TravisWeb` (CloudFront, explorer and mirror buckets), each pinned to `us-east-2`, fixed construct IDs.
 Order: deploy-build, `cdk deploy TravisApi`, explorer build with `VITE_API_URL` (the HTTP API `$default` URL), `cdk deploy TravisWeb`, then the T7 and T8 checks. Deploys are run by the operator, never from CI.
+
+## Function environment (set by the CDK stack, read by the handlers)
+
+| Variable | Function | Value |
+| --- | --- | --- |
+| `DUCKDB_PATH` | both | `/opt/db/travis.duckdb` |
+| `DUCKDB_EXTENSION_DIR` | both | `/opt/duckdb_extensions` (bundled `fts`, autoinstall and autoload off) |
+| `DUCKDB_MEMORY_LIMIT`, `DUCKDB_THREADS` | both | from the CDK config, sized from the T7 measurements |
+| `LIMITS_JSON` | both | `{stage, routes, mcp, chat}` from the CDK config, served in `/v1/meta.limits` |
+| `POWERTOOLS_SERVICE_NAME` | both | `travis-api` / `travis-chat` |
+| `POWERTOOLS_METRICS_NAMESPACE` | both | `TravisPropertyIntelligence` |
+| `CHAT_FLAG_PARAM` | chat | SSM parameter name of the budget kill switch (`/travis/chat/budget-exhausted`, value `true`/`false`) |
+| `BEDROCK_MODEL_ID` | chat | stack parameter; unused until T9 |
+
+The image's `CMD` selects the handler: `api.handler` or `chat.handler`.
+
+## T7 chat route
+
+Until T9 the chat handler answers `503 {error: "agent_unavailable", reason: "model_unavailable", request_id}` without
+calling Bedrock (`reason: "budget_exhausted"` when the SSM flag is `true`), so the route, its throttle, the kill switch
+and the alarms are deployed and checked at T7 at no model cost.
