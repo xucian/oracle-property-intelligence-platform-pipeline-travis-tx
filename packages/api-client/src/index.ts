@@ -1,1 +1,3 @@
-export const packageName = '@travis/api-client';
+export * from './client.js';
+export * from './errors.js';
+export * from './paging.js';
