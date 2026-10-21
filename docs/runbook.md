@@ -752,7 +752,7 @@ Run 1 is `20261018T143520Z-t5-full`, run 2 is `20261020T200236Z-t5-full`.
    two full runs, newest first (plus the small pilot). Run 2 says it follows run 1 and shows 232 new and 3,662 changed permits.
    Raw: [`/v1/runs`](https://733jzm4xv4.execute-api.us-east-2.amazonaws.com/v1/runs).
 2. **Run 1's CID still resolves and run 2 has its own** (README line 101). Each link opens a run's manifest from a public
-   gateway; all four should open as JSON:
+   gateway; all four should open as JSON (Run history links the same URLs next to each manifest CID):
    - run 1: [Filebase](https://ipfs.filebase.io/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4),
      [Pinata](https://gateway.pinata.cloud/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4)
    - run 2: [Filebase](https://ipfs.filebase.io/ipfs/bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy),
@@ -768,3 +768,5 @@ Run 1 is `20261018T143520Z-t5-full`, run 2 is `20261020T200236Z-t5-full`.
 4. **The CAR files are downloadable.** [Run 1's release](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases/tag/run-20261018T143520Z-t5-full)
    has 354 files; [run 2's release](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases/tag/run-20261020T200236Z-t5-full)
    has 156 (only its new CARs; unchanged ones stay in run 1's).
+
+Verified 2026-10-21: the operator ran these four checks and approved T10.

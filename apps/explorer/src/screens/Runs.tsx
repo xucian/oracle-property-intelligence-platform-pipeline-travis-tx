@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Cid, ErrorBox, Loading, Section } from '../components/common.js';
 import { useRuns } from '../hooks.js';
 import { fmtInt, fmtTime } from '../lib/format.js';
+import { GATEWAYS, gatewayUrl } from '../lib/verify.js';
 
-/** Demo step 6: every run with its group roots (`<group>/<shard>` keys) and manifest CID; a second run appends here. */
+/** Demo step 6: every run with its group roots (`<group>/<shard>` keys) and manifest CID, which opens on both public gateways; a second run appends here. */
 export function Runs() {
   const runs = useRuns();
   const [filter, setFilter] = useState('');
@@ -35,6 +36,18 @@ export function Runs() {
             <p>
               Manifest CID:{' '}
               {run.manifest_cid ? <Cid value={run.manifest_cid} /> : 'n/a (not published)'}
+              {run.manifest_cid
+                ? GATEWAYS.map((g) => (
+                    <a
+                      key={g}
+                      href={gatewayUrl(g, { cid: run.manifest_cid as string, codec: 'file' })}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {new URL(g).hostname}
+                    </a>
+                  )).flatMap((a) => [' · ', a])
+                : null}
             </p>
             {run.deltas ? (
               <p className="muted">

@@ -157,6 +157,13 @@ describe('Run history (demo step 6)', () => {
     expect(cards).toHaveLength(2);
     const full = cards[0] as HTMLElement;
     expect(within(full).getByText(MANIFEST_CID)).toBeTruthy();
+    const links = within(full)
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href'));
+    expect(links).toEqual([
+      `https://ipfs.filebase.io/ipfs/${MANIFEST_CID}`,
+      `https://gateway.pinata.cloud/ipfs/${MANIFEST_CID}`,
+    ]);
     expect(within(full).getByText('177 group roots')).toBeTruthy();
     expect(within(full).getByText('county/s0001')).toBeTruthy();
     expect(within(cards[1] as HTMLElement).getByText(/n\/a \(not published\)/)).toBeTruthy();
