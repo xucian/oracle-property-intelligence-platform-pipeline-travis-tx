@@ -65,6 +65,7 @@ Order: deploy-build, `just deploy-api` (serving export and upload, then `cdk dep
 | `LIMITS_JSON` | both | `{stage, routes, mcp, chat}` from the CDK config, served in `/v1/meta.limits` |
 | `POWERTOOLS_SERVICE_NAME` | both | `travis-api` / `staraptor-agent` (decisions.md section 32) |
 | `POWERTOOLS_METRICS_NAMESPACE` | both | `TravisPropertyIntelligence` / `staraptor-agent` |
+| `API_FLAG_PARAM` | api | SSM parameter name of the API's budget kill switch (`/travis/api/budget-exhausted`, value `true`/`false`; decisions.md section 34) |
 | `CHAT_FLAG_PARAM` | chat | SSM parameter name of the budget kill switch (`/travis/chat/budget-exhausted`, value `true`/`false`) |
 | `BEDROCK_MODEL_ID` | chat | the inference profile, `bedrockModelId` in the CDK config (default `us.anthropic.claude-sonnet-4-6`) |
 | `LANGSMITH_API_KEY_SECRET_ID` | chat | `staraptor-agent/langsmith-api-key`: the Secrets Manager secret read at init (the key is never in the environment) |

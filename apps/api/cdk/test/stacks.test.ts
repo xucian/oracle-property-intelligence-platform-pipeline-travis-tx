@@ -125,6 +125,7 @@ describe('TravisApi stack', () => {
           DUCKDB_THREADS: '4',
           POWERTOOLS_SERVICE_NAME: 'travis-api',
           POWERTOOLS_METRICS_NAMESPACE: 'TravisPropertyIntelligence',
+          API_FLAG_PARAM: '/travis/api/budget-exhausted',
           LIMITS_JSON: Match.stringLikeRegexp('agent/chat'),
         }),
       },
@@ -156,13 +157,13 @@ describe('TravisApi stack', () => {
       expect(r).toContain('/serving/*');
     };
 
-    it('api function: logs, X-Ray and the serving set only', () => {
+    it('api function: logs, X-Ray, the serving set and its kill-switch flag only', () => {
       const s = statementsFor(api, 'ApiFunction');
       const actions = allActions(s);
       expect(actions.sort()).toEqual(
         expect.arrayContaining(['xray:PutTraceSegments', 'xray:PutTelemetryRecords']),
       );
-      for (const a of actions) expect(a).toMatch(/^(xray|ecr|logs|s3):/);
+      for (const a of actions) expect(a).toMatch(/^(xray:|ecr:|logs:|s3:|ssm:GetParameter$)/);
       expectServingGrantOnly(s);
       const role = Object.values(api.findResources('AWS::IAM::Role')).find((r) =>
         JSON.stringify((r as Json).Properties.ManagedPolicyArns ?? '').includes(
@@ -171,7 +172,7 @@ describe('TravisApi stack', () => {
       );
       expect(role).toBeDefined();
       const flat = JSON.stringify(s);
-      for (const denied of ['bedrock', 'ssm:', 'aws-marketplace', 'secretsmanager']) {
+      for (const denied of ['bedrock', 'ssm:PutParameter', 'aws-marketplace', 'secretsmanager']) {
         expect(flat).not.toContain(denied);
       }
     });
@@ -230,11 +231,12 @@ describe('TravisApi stack', () => {
       ]);
     });
 
-    it('flag writer: ssm:PutParameter on the flag only', () => {
+    it('flag writer: ssm:PutParameter on the two flags only', () => {
       const s = statementsFor(api, 'BudgetFlagSetter');
       const put = s.find((x) => x.actions.includes('ssm:PutParameter'))!;
       expect(put.actions).toEqual(['ssm:PutParameter']);
       expect(JSON.stringify(put.resources)).toContain('ChatBudgetFlag');
+      expect(JSON.stringify(put.resources)).toContain('ApiBudgetFlag');
       expect(JSON.stringify(s)).not.toContain('bedrock');
     });
 
@@ -243,13 +245,22 @@ describe('TravisApi stack', () => {
       expect(JSON.stringify(web.toJSON())).not.toContain('aws-marketplace');
     });
 
-    it('stores the flag as a standard SSM parameter', () => {
-      api.hasResourceProperties('AWS::SSM::Parameter', {
-        Name: '/travis/chat/budget-exhausted',
-        Type: 'String',
-        Tier: 'Standard',
-        Value: 'false',
-      });
+    it('stores the flags as standard SSM parameters', () => {
+      for (const Name of ['/travis/chat/budget-exhausted', '/travis/api/budget-exhausted'])
+        api.hasResourceProperties('AWS::SSM::Parameter', {
+          Name,
+          Type: 'String',
+          Tier: 'Standard',
+          Value: 'false',
+        });
+    });
+
+    it('API function: ssm:GetParameter on its own flag only', () => {
+      const s = statementsFor(api, 'ApiFunction');
+      const ssm = s.find((x) => x.actions.includes('ssm:GetParameter'))!;
+      expect(ssm.actions).toEqual(['ssm:GetParameter']);
+      expect(JSON.stringify(ssm.resources)).toContain('ApiBudgetFlag');
+      expect(JSON.stringify(ssm.resources)).not.toContain('ChatBudgetFlag');
     });
   });
 
@@ -346,7 +357,7 @@ describe('TravisApi stack', () => {
     it('has at most ten alarms, all notifying the one email-only topic and self-resolving', () => {
       const alarms = Object.values(api.findResources('AWS::CloudWatch::Alarm')) as Json[];
       expect(alarms.length).toBeLessThanOrEqual(10);
-      expect(alarms.length).toBe(9);
+      expect(alarms.length).toBe(10);
       for (const a of alarms) {
         expect(a.Properties.AlarmActions).toHaveLength(1);
         expect(a.Properties.OKActions).toHaveLength(1);
@@ -387,12 +398,32 @@ describe('TravisApi stack', () => {
         expect(m.MetricStat.Metric.Namespace).toBe('staraptor-agent');
         expect(m.MetricStat.Period).toBe(86400);
       }
-      api.hasResourceProperties('AWS::Lambda::Function', {
-        Environment: {
-          Variables: Match.objectLike({
-            BUDGET_ALARM_NAMES: 'travis-chat-daily-usage,travis-chat-daily-tokens',
-          }),
+      const setter = Object.values(api.findResources('AWS::Lambda::Function')).find(
+        (f) => (f as Json).Properties.Environment?.Variables?.BUDGET_FLAGS,
+      ) as Json;
+      expect(JSON.parse(setter.Properties.Environment.Variables.BUDGET_FLAGS)).toEqual({
+        'travis-chat-daily-usage': {
+          param: '/travis/chat/budget-exhausted',
+          metric: 'ChatBudgetFlagSet',
         },
+        'travis-chat-daily-tokens': {
+          param: '/travis/chat/budget-exhausted',
+          metric: 'ChatBudgetFlagSet',
+        },
+        'travis-api-daily-usage': {
+          param: '/travis/api/budget-exhausted',
+          metric: 'ApiBudgetFlagSet',
+        },
+      });
+    });
+
+    it('API daily usage alarm uses a one-day sum of API invocations at the configured limit', () => {
+      api.hasResourceProperties('AWS::CloudWatch::Alarm', {
+        AlarmName: 'travis-api-daily-usage',
+        MetricName: 'Invocations',
+        Period: 86400,
+        Statistic: 'Sum',
+        Threshold: config.dailyApiRequestLimit,
       });
     });
 
@@ -408,10 +439,11 @@ describe('TravisApi stack', () => {
       });
     });
 
-    it('has no standing schedule but the daily flag clear (no warm-up pings; decisions.md section 31)', () => {
-      const schedules = Object.keys(api.findResources('AWS::Scheduler::Schedule'));
-      expect(schedules).toHaveLength(1);
-      expect(schedules[0]).toMatch(/^ClearBudgetFlagDaily/);
+    it('has no standing schedule but the daily flag clears (no warm-up pings; decisions.md section 31)', () => {
+      const schedules = Object.keys(api.findResources('AWS::Scheduler::Schedule')).sort();
+      expect(schedules).toHaveLength(2);
+      expect(schedules[0]).toMatch(/^ClearApiBudgetFlagDaily/);
+      expect(schedules[1]).toMatch(/^ClearBudgetFlagDaily/);
     });
 
     it('does not use reserved concurrency zero as the kill switch', () => {

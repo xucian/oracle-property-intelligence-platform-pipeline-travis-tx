@@ -55,6 +55,8 @@ import { LOG_RETENTION, pinLambdaLogGroups } from './logs.js';
 export const CHAT_FLAG_PARAM = '/travis/chat/budget-exhausted';
 export const DAILY_USAGE_ALARM_NAME = 'travis-chat-daily-usage';
 export const DAILY_TOKENS_ALARM_NAME = 'travis-chat-daily-tokens';
+export const API_FLAG_PARAM = '/travis/api/budget-exhausted';
+export const API_DAILY_USAGE_ALARM_NAME = 'travis-api-daily-usage';
 export const METRICS_NAMESPACE = 'TravisPropertyIntelligence';
 /** The chat function's runtime name (decisions.md sections 20 and 32): its Powertools service and metrics namespace. */
 export const AGENT_NAME = 'staraptor-agent';
@@ -65,21 +67,27 @@ export interface TravisApiProps extends StackProps {
   imageDirectory: string;
 }
 
-/** Runs when the daily-usage alarm fires (via SNS) and sets the chat kill switch. Node 22 runtime, SDK v3 included. */
+/**
+ * Runs when a daily-usage alarm fires (via SNS) and sets that alarm's kill switch: `BUDGET_FLAGS` maps alarm name to
+ * `{param, metric}`. Node 22 runtime, SDK v3 included.
+ */
 const BUDGET_FLAG_SETTER = `
 const { SSMClient, PutParameterCommand } = require('@aws-sdk/client-ssm');
 const ssm = new SSMClient({});
 exports.handler = async (event) => {
-  let set = false;
+  const flags = JSON.parse(process.env.BUDGET_FLAGS);
+  const set = new Map();
   for (const record of event.Records ?? []) {
     let message;
     try { message = JSON.parse(record.Sns.Message); } catch { continue; }
-    if (process.env.BUDGET_ALARM_NAMES.split(',').includes(message.AlarmName) && message.NewStateValue === 'ALARM') set = true;
+    const flag = flags[message.AlarmName];
+    if (flag && message.NewStateValue === 'ALARM') set.set(flag.param, flag.metric);
   }
-  if (!set) return { set: false };
-  await ssm.send(new PutParameterCommand({ Name: process.env.CHAT_FLAG_PARAM, Value: 'true', Type: 'String', Overwrite: true }));
-  console.log(JSON.stringify({ _aws: { Timestamp: Date.now(), CloudWatchMetrics: [{ Namespace: process.env.METRICS_NAMESPACE, Dimensions: [[]], Metrics: [{ Name: 'ChatBudgetFlagSet', Unit: 'Count' }] }] }, ChatBudgetFlagSet: 1 }));
-  return { set: true };
+  for (const [Name, metric] of set) {
+    await ssm.send(new PutParameterCommand({ Name, Value: 'true', Type: 'String', Overwrite: true }));
+    console.log(JSON.stringify({ _aws: { Timestamp: Date.now(), CloudWatchMetrics: [{ Namespace: process.env.METRICS_NAMESPACE, Dimensions: [[]], Metrics: [{ Name: metric, Unit: 'Count' }] }] }, [metric]: 1 }));
+  }
+  return { set: [...set.keys()] };
 };
 `;
 
@@ -139,7 +147,7 @@ export class TravisApi extends Stack {
       timeout: Duration.seconds(25),
       tracing: Tracing.ACTIVE,
       logGroup: apiLogs,
-      environment: { ...sharedEnv, POWERTOOLS_SERVICE_NAME: 'travis-api' },
+      environment: { ...sharedEnv, POWERTOOLS_SERVICE_NAME: 'travis-api', API_FLAG_PARAM },
     });
 
     const chatFn = new DockerImageFunction(this, 'ChatFunction', {
@@ -191,7 +199,7 @@ export class TravisApi extends Stack {
         }),
       );
 
-    // --- Kill switch flag and IAM for chat (the only Bedrock grant) ---
+    // --- Kill switch flags (chat, and the API function's REST and MCP) and IAM for chat (the only Bedrock grant) ---
     const flag = new StringParameter(this, 'ChatBudgetFlag', {
       parameterName: CHAT_FLAG_PARAM,
       stringValue: 'false',
@@ -199,6 +207,21 @@ export class TravisApi extends Stack {
       description:
         'true while the daily chat budget is exhausted; chat answers 503 budget_exhausted',
     });
+    const apiFlag = new StringParameter(this, 'ApiBudgetFlag', {
+      parameterName: API_FLAG_PARAM,
+      stringValue: 'false',
+      tier: ParameterTier.STANDARD,
+      description:
+        'true while the daily API request budget is exhausted; REST and MCP answer 503 budget_exhausted',
+    });
+    apiFn.addToRolePolicy(
+      new PolicyStatement({
+        sid: 'ReadBudgetFlag',
+        effect: Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [apiFlag.parameterArn],
+      }),
+    );
 
     const modelId = foundationModelId(config);
     chatFn.addToRolePolicy(
@@ -330,13 +353,19 @@ export class TravisApi extends Stack {
       timeout: Duration.seconds(10),
       logGroup: flagWriterLogs,
       environment: {
-        CHAT_FLAG_PARAM,
-        BUDGET_ALARM_NAMES: `${DAILY_USAGE_ALARM_NAME},${DAILY_TOKENS_ALARM_NAME}`,
+        BUDGET_FLAGS: JSON.stringify({
+          [DAILY_USAGE_ALARM_NAME]: { param: CHAT_FLAG_PARAM, metric: 'ChatBudgetFlagSet' },
+          [DAILY_TOKENS_ALARM_NAME]: { param: CHAT_FLAG_PARAM, metric: 'ChatBudgetFlagSet' },
+          [API_DAILY_USAGE_ALARM_NAME]: { param: API_FLAG_PARAM, metric: 'ApiBudgetFlagSet' },
+        }),
         METRICS_NAMESPACE,
       },
     });
     flagSetter.addToRolePolicy(
-      new PolicyStatement({ actions: ['ssm:PutParameter'], resources: [flag.parameterArn] }),
+      new PolicyStatement({
+        actions: ['ssm:PutParameter'],
+        resources: [flag.parameterArn, apiFlag.parameterArn],
+      }),
     );
     flagSetter.addEventSource(new SnsEventSource(topic));
 
@@ -344,29 +373,31 @@ export class TravisApi extends Stack {
       assumedBy: new ServicePrincipal('scheduler.amazonaws.com'),
     });
     schedulerRole.addToPolicy(
-      new PolicyStatement({ actions: ['ssm:PutParameter'], resources: [flag.parameterArn] }),
+      new PolicyStatement({
+        actions: ['ssm:PutParameter'],
+        resources: [flag.parameterArn, apiFlag.parameterArn],
+      }),
     );
-    new CfnSchedule(this, 'ClearBudgetFlagDaily', {
-      description: 'Clears the chat budget kill switch at 00:00 UTC',
-      scheduleExpression: 'cron(0 0 * * ? *)',
-      scheduleExpressionTimezone: 'UTC',
-      flexibleTimeWindow: { mode: 'OFF' },
-      target: {
-        arn: 'arn:aws:scheduler:::aws-sdk:ssm:putParameter',
-        roleArn: schedulerRole.roleArn,
-        input: JSON.stringify({
-          Name: CHAT_FLAG_PARAM,
-          Value: 'false',
-          Type: 'String',
-          Overwrite: true,
-        }),
-      },
-    });
+    for (const [id, what, name] of [
+      ['ClearBudgetFlagDaily', 'chat', CHAT_FLAG_PARAM],
+      ['ClearApiBudgetFlagDaily', 'API', API_FLAG_PARAM],
+    ] as const)
+      new CfnSchedule(this, id, {
+        description: `Clears the ${what} budget kill switch at 00:00 UTC`,
+        scheduleExpression: 'cron(0 0 * * ? *)',
+        scheduleExpressionTimezone: 'UTC',
+        flexibleTimeWindow: { mode: 'OFF' },
+        target: {
+          arn: 'arn:aws:scheduler:::aws-sdk:ssm:putParameter',
+          roleArn: schedulerRole.roleArn,
+          input: JSON.stringify({ Name: name, Value: 'false', Type: 'String', Overwrite: true }),
+        },
+      });
 
     // No standing warm-up schedule (decisions.md section 31): the README rules out ongoing cost by default, so
     // instances are warmed by `just warm` after a deploy and by the clients' prewarm when a person opens them.
 
-    // --- Alarms (9 of the 10 allowed; all self-resolving) ---
+    // --- Alarms (10 of the 10 allowed; all self-resolving) ---
     const five = Duration.minutes(5);
     const mk = (id: string, alarm: ConstructorParameters<typeof Alarm>[2]) => {
       const a = new Alarm(this, id, { treatMissingData: TreatMissingData.NOT_BREACHING, ...alarm });
@@ -426,6 +457,15 @@ export class TravisApi extends Stack {
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
     });
+    mk('ApiDailyUsageAlarm', {
+      alarmName: API_DAILY_USAGE_ALARM_NAME,
+      alarmDescription:
+        'API function (REST and MCP) invocations in a UTC day; sets its budget kill switch through SNS',
+      metric: apiFn.metricInvocations({ period: Duration.days(1), statistic: 'Sum' }),
+      threshold: config.dailyApiRequestLimit,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+    });
     const chatMetric = (metricName: string, statistic = 'Sum', period = Duration.days(1)) =>
       new Metric({
         namespace: AGENT_NAME,
@@ -450,13 +490,22 @@ export class TravisApi extends Stack {
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
     });
+    const flagSetMetric = (metricName: string) =>
+      new Metric({
+        namespace: METRICS_NAMESPACE,
+        metricName,
+        statistic: 'Sum',
+        period: Duration.hours(1),
+      });
     mk('BudgetFlagSetAlarm', {
       alarmDescription:
-        'The chat budget kill switch was set; clears itself an hour later, the flag at 00:00 UTC',
-      metric: new Metric({
-        namespace: METRICS_NAMESPACE,
-        metricName: 'ChatBudgetFlagSet',
-        statistic: 'Sum',
+        'A budget kill switch (chat or API) was set; clears itself an hour later, the flags at 00:00 UTC',
+      metric: new MathExpression({
+        expression: 'chat + api',
+        usingMetrics: {
+          chat: flagSetMetric('ChatBudgetFlagSet'),
+          api: flagSetMetric('ApiBudgetFlagSet'),
+        },
         period: Duration.hours(1),
       }),
       threshold: 1,
@@ -549,19 +598,17 @@ export class TravisApi extends Stack {
           new SingleValueWidget({
             title: 'Chat invocations today (limit ' + config.dailyChatRequestLimit + ')',
             metrics: [chatFn.metricInvocations({ period: Duration.days(1) })],
-            width: 12,
+            width: 8,
+          }),
+          new SingleValueWidget({
+            title: 'API invocations today (limit ' + config.dailyApiRequestLimit + ')',
+            metrics: [apiFn.metricInvocations({ period: Duration.days(1) })],
+            width: 8,
           }),
           new SingleValueWidget({
             title: 'Budget flag set events (last hour)',
-            metrics: [
-              new Metric({
-                namespace: METRICS_NAMESPACE,
-                metricName: 'ChatBudgetFlagSet',
-                statistic: 'Sum',
-                period: Duration.hours(1),
-              }),
-            ],
-            width: 12,
+            metrics: [flagSetMetric('ChatBudgetFlagSet'), flagSetMetric('ApiBudgetFlagSet')],
+            width: 8,
           }),
         ],
       ],

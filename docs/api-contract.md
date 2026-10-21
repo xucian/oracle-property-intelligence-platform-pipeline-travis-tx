@@ -44,6 +44,8 @@ the group CIDs) keep the kit's spelling so that a reader of the Atlas tables and
   unknown ids, `413 {error, detail, request_id}` for an oversized chat request, `429`, `5xx {error, request_id}`.
   Chat adds
   `503 {error: "agent_unavailable", reason: "budget_exhausted"|"model_unavailable"|"circuit_open", request_id}`.
+  Every other route (REST and MCP) answers `503 {error: "api_unavailable", reason: "budget_exhausted", detail,
+  request_id}` while the API's daily kill switch is set (decisions.md section 34).
   Responses API Gateway generates itself carry only its own `{message}` body and the `apigw-requestid` header: the
   `429` throttle, a `413` above the platform's payload limit, a `5xx` on a function error or throttle, and
   `503`/`504` when a request passes 30 s. Clients never retry chat automatically on a `5xx` or `504`.

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { MetricUnit } from '@aws-lambda-powertools/metrics';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { Meta } from '@travis/contract';
@@ -18,6 +17,7 @@ import type { ToolCallRecord } from '../chat/tools.js';
 import { runTurn, type TurnDeps, type TurnStats } from '../chat/turn.js';
 import { limitsFromEnv, queriesLoader } from '../db.js';
 import { createObservability } from '../observability.js';
+import { type FlagReader, cachedFlag, ssmFlagReader, within } from '../flag.js';
 import { AGENT_PRIME } from '../warm.js';
 
 /** The runtime's name (decisions.md section 20, "Observability"; confirmed 2026-10-20): service, namespace, LangSmith. */
@@ -25,42 +25,10 @@ export const AGENT_NAME = 'staraptor-agent';
 
 const { observer, logger, metrics } = createObservability(AGENT_NAME);
 
-export type FlagReader = () => Promise<string | null>;
+export { cachedFlag, SDK_CLIENT_OPTIONS, within, type FlagReader } from '../flag.js';
 
-/**
- * Reads the budget kill-switch parameter (`CHAT_FLAG_PARAM`, value `true`/`false`) with SSM. The AWS SDK v3 ships with the
- * Lambda base image, so the client is imported at run time and left out of the bundle.
- */
-export const readFlagFromSsm: FlagReader = async () => {
-  const name = process.env.CHAT_FLAG_PARAM;
-  if (!name) return null;
-  // createRequire, not import(): ESM resolution ignores NODE_PATH, which is how the Lambda base image exposes its bundled SDK
-  const { SSMClient, GetParameterCommand } = createRequire(import.meta.url)(
-    '@aws-sdk/client-ssm',
-  ) as typeof import('@aws-sdk/client-ssm');
-  const r = await new SSMClient(SDK_CLIENT_OPTIONS).send(new GetParameterCommand({ Name: name }));
-  return r.Parameter?.Value ?? null;
-};
-
-/** Short cache (30 s) of the flag, shared by warm invocations. */
-export function cachedFlag(
-  read: FlagReader,
-  ttlMs = 30_000,
-  now: () => number = Date.now,
-): FlagReader {
-  let value: string | null = null;
-  let at = -Infinity;
-  return async () => {
-    if (now() - at < ttlMs) return value;
-    try {
-      value = await read();
-    } catch {
-      // a failed read keeps the previous value
-    }
-    at = now();
-    return value;
-  };
-}
+/** Reads the budget kill-switch parameter (`CHAT_FLAG_PARAM`). */
+export const readFlagFromSsm: FlagReader = ssmFlagReader('CHAT_FLAG_PARAM');
 
 /** The warm-up event `just warm` sends to the chat function: opens and primes the instance, never calls the model. */
 export interface WarmEvent {
@@ -86,25 +54,6 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
 /** Bound of each step before the turn (the flag read, the tracing facade). */
 const PRE_TURN_MS = 1500;
-/** Resolves to `fallback` when `p` takes longer than `ms` or rejects. */
-export async function within<T, F>(p: Promise<T>, ms: number, fallback: F): Promise<T | F> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      p.catch(() => fallback),
-      new Promise<F>((r) => (timer = setTimeout(() => r(fallback), Math.max(0, ms)))),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Short timeouts and one retry for the SDK clients a turn waits on (SSM flag, Secrets Manager key). */
-export const SDK_CLIENT_OPTIONS = {
-  maxAttempts: 2,
-  requestHandler: { connectionTimeout: 1000, requestTimeout: 1000 },
-};
-
 /** Free-text parameters (search words, names, printed numbers) are logged as hashes; ids, numbers and flags as given. */
 const HASHED_PARAMS = new Set(['q', 'number', 'license_number']);
 export function logParams(args: Record<string, unknown>): Record<string, unknown> {

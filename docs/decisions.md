@@ -2247,3 +2247,20 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   `unnormalized_address`, city, ZIP, coordinates and the TCAD source URL; checked on shard s0001); only the CLI's
   `export-tables` (1.58.1) leaves those columns out of the `address` table. The API's situs text comes from the same TCAD
   capture; the address record's CID, served beside it, resolves to the published text. Recorded as a limitation; no code change.
+
+## 34. 2026-10-21: the API function gets a daily kill switch like chat's
+
+Before submission the operator ruled that the search API needs a daily stop, not only its throttle: held at the stage's
+20 requests a second for a whole day, the API function would cost about $35–70 (3,008 MB arm64 at 0.5–1 s a call).
+
+- **Mechanism, the same as chat's (section 21).** A second SSM standard parameter, `/travis/api/budget-exhausted`; a
+  tenth alarm, `travis-api-daily-usage`, on the API function's invocations summed over one UTC day above
+  `dailyApiRequestLimit` (default 20,000, far above review traffic); the flag writer now maps each alarm to its flag
+  (`BUDGET_FLAGS`) and emits `ApiBudgetFlagSet` or `ChatBudgetFlagSet`; the budget-flag alarm sums both; a second
+  Scheduler job clears the API flag at 00:00 UTC. The API function gets `ssm:GetParameter` on its own flag only.
+- **Behaviour.** While the flag is `true`, every REST and MCP request answers `503 {error: "api_unavailable", reason:
+  "budget_exhausted", detail, request_id}` before the query layer is touched; the flag is read with the same 30 s cache
+  and a 1.5 s bound, and at init. Warm-ups are not blocked. Reserved concurrency zero is still not used (section 21).
+- **Cost of the worst day** falls to about $5: the requests before the alarm trips, then about 1.7 million fast 503s,
+  mostly API Gateway's $1 per million.
+

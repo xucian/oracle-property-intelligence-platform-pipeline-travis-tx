@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from '
 import { DEFAULT_LIMITS, type Queries } from '@travis/query';
 import { App, type HttpRequest } from '../app.js';
 import { limitsFromEnv, queriesLoader } from '../db.js';
+import { cachedFlag, ssmFlagReader, within } from '../flag.js';
 import { createObservability } from '../observability.js';
 import { PRIME } from '../warm.js';
 
@@ -9,8 +10,13 @@ const { observer, logger } = createObservability('travis-api');
 
 /** The instance's query layer (opened at init in Lambda, reused while warm; see db.ts). */
 export const getQueries: () => Promise<Queries> = queriesLoader(logger);
-// Start at init, so the first request finds the instance ready or nearly so.
-if (process.env.AWS_LAMBDA_FUNCTION_NAME) getQueries().catch(() => undefined);
+/** The REST and MCP kill switch (`API_FLAG_PARAM`): set when the function's daily invocations pass the limit. */
+const readFlag = cachedFlag(ssmFlagReader('API_FLAG_PARAM'));
+// Start both at init, so the first request finds the instance ready or nearly so.
+if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  getQueries().catch(() => undefined);
+  readFlag().catch(() => undefined);
+}
 
 /** The warm-up event `just warm` sends (after every deploy, and before a live demo; decisions.md section 31). */
 export interface WarmEvent {
@@ -58,6 +64,20 @@ export async function handler(
   event: APIGatewayProxyEventV2 | WarmEvent,
 ): Promise<APIGatewayProxyStructuredResultV2 | { warmed: true; primed_now: boolean }> {
   if ('warm' in event) return warm(event.warm ?? {});
+  if ((await within(readFlag(), 1500, null)) === 'true') {
+    const requestId = event.requestContext.requestId;
+    logger.warn('budget exhausted', { requestId });
+    return {
+      statusCode: 503,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'x-request-id': requestId },
+      body: JSON.stringify({
+        error: 'api_unavailable',
+        reason: 'budget_exhausted',
+        detail: 'the daily request budget is used up; it resets at 00:00 UTC',
+        request_id: requestId,
+      }),
+    };
+  }
   const headers: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(event.headers ?? {})) headers[k.toLowerCase()] = v;
   const req: HttpRequest = {

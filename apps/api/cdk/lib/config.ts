@@ -51,6 +51,8 @@ export const ConfigSchema = z.object({
   dailyChatRequestLimit: z.number().int().positive().default(200),
   /** Bedrock input plus output tokens of chat per UTC day above which the kill switch is set. */
   dailyChatTokenLimit: z.number().int().positive().default(5_000_000),
+  /** Invocations of the API function (REST and MCP) per UTC day above which its kill switch is set. */
+  dailyApiRequestLimit: z.number().int().positive().default(20_000),
   alarmEmails: z.array(z.email()).min(1),
   /** The TravisApi `ApiBase` output, copied here only as a fallback for `just build-explorer`. */
   viteApiUrl: z.url().optional(),
