@@ -54,6 +54,8 @@ export const ConfigSchema = z.object({
   /** Invocations of the API function (REST and MCP) per UTC day above which its kill switch is set. */
   dailyApiRequestLimit: z.number().int().positive().default(50_000),
   alarmEmails: z.array(z.email()).min(1),
+  /** SSM String parameter holding a PagerDuty CloudWatch integration URL; the alarm topic subscribes it over HTTPS. */
+  pagerDutyUrlParam: z.string().startsWith('/').optional(),
   /** The TravisApi `ApiBase` output, copied here only as a fallback for `just build-explorer`. */
   viteApiUrl: z.url().optional(),
 });

@@ -46,8 +46,8 @@ import { SnsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
 import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { StringParameter, ParameterTier } from 'aws-cdk-lib/aws-ssm';
-import { Topic } from 'aws-cdk-lib/aws-sns';
-import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
+import { SubscriptionProtocol, Topic } from 'aws-cdk-lib/aws-sns';
+import { EmailSubscription, UrlSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 import type { Construct } from 'constructs';
 import { type TravisConfig, foundationModelId, limitsJson } from './config.js';
 import { LOG_RETENTION, pinLambdaLogGroups } from './logs.js';
@@ -334,11 +334,18 @@ export class TravisApi extends Stack {
     // RouteSettings name routes by key; CloudFormation rejects the stage if they do not exist yet.
     for (const route of routes) stage.node.addDependency(route);
 
-    // --- Alerting: one topic, email only ---
+    // --- Alerting: one topic, email and (when configured) PagerDuty ---
     const topic = new Topic(this, 'AlarmTopic', {
       displayName: 'Travis property intelligence alarms',
     });
     for (const email of config.alarmEmails) topic.addSubscription(new EmailSubscription(email));
+    if (config.pagerDutyUrlParam)
+      topic.addSubscription(
+        new UrlSubscription(
+          StringParameter.valueForStringParameter(this, config.pagerDutyUrlParam),
+          { protocol: SubscriptionProtocol.HTTPS },
+        ),
+      );
     const alarmAction = new SnsAction(topic);
 
     const flagWriterLogs = new LogGroup(this, 'BudgetFlagSetterLogs', {

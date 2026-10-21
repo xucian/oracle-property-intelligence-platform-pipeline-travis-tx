@@ -372,6 +372,31 @@ describe('TravisApi stack', () => {
       expect(subs.filter((s) => s.Properties.Protocol === 'https')).toHaveLength(0);
     });
 
+    it('subscribes the PagerDuty integration URL from SSM over HTTPS when configured', () => {
+      const t = Template.fromStack(
+        new TravisApi(new App(), 'TravisApi', {
+          env,
+          config: parseConfig({
+            ...example,
+            pagerDutyUrlParam: '/roofing-crm/pagerduty/integration-url',
+          }),
+          imageDirectory: fixtureDirs().image,
+        }),
+      );
+      const https = (Object.values(t.findResources('AWS::SNS::Subscription')) as Json[]).filter(
+        (s) => s.Properties.Protocol === 'https',
+      );
+      expect(https).toHaveLength(1);
+      const params = t.toJSON().Parameters as Record<string, { Type: string; Default: string }>;
+      expect(
+        Object.values(params).some(
+          (p) =>
+            p.Type === 'AWS::SSM::Parameter::Value<String>' &&
+            p.Default === '/roofing-crm/pagerduty/integration-url',
+        ),
+      ).toBe(true);
+    });
+
     it('daily usage alarm uses a one-day sum of chat invocations at the configured limit', () => {
       api.hasResourceProperties('AWS::CloudWatch::Alarm', {
         AlarmName: 'travis-chat-daily-usage',
