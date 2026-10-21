@@ -22,14 +22,8 @@
       "latency_ms_p50": 8039,
       "latency_ms_p95": 11850,
       "latency_ms_max": 13464,
-      "readme_turn_ms": [
-        9067,
-        11850
-      ],
-      "state_suffix_turn_ms": [
-        8338,
-        10028
-      ],
+      "readme_turn_ms": [9067, 11850],
+      "state_suffix_turn_ms": [8338, 10028],
       "model_ms_p50": null,
       "model_ms_p95": null,
       "steps_mean": null,
@@ -57,9 +51,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok"],
       "evidence": 1,
       "stats": null,
       "cost_usd": null,
@@ -84,9 +76,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok"],
       "evidence": 4,
       "stats": null,
       "cost_usd": null,
@@ -111,10 +101,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 21,
       "stats": null,
       "cost_usd": null,
@@ -126,9 +113,7 @@
         "Roof age basis and confidence vary per property; many fall back to year built (low confidence). Open permits were excluded from the match criteria, so only aged-roof matches are shown.",
         "Search center WEST LAKE HILLS (city, exact match): 678 parcels; centroid of 678 parcels with situs city WEST LAKE HILLS (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "bbb-rating",
@@ -144,9 +129,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "get_permit:ok"
-      ],
+      "tool_sequence": ["get_permit:ok"],
       "evidence": 3,
       "stats": null,
       "cost_usd": null,
@@ -159,11 +142,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "partial_history"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "partial_history"]
     },
     {
       "case": "city-lakeway-open-permits",
@@ -179,10 +158,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_permits:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_permits:ok"],
       "evidence": 1,
       "stats": null,
       "cost_usd": null,
@@ -210,10 +186,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 22,
       "stats": null,
       "cost_usd": null,
@@ -225,9 +198,7 @@
         "Roof ages are based on `year_built` (low confidence) for all results shown, as no roofing permit history was found. Open permits filter is off, so only aged-roof matches are returned.",
         "Search center PFLUGERVILLE (city, exact match): 18,849 parcels; centroid of 18,150 parcels with situs city PFLUGERVILLE (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "contractor-identity",
@@ -243,11 +214,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "get_permit:ok",
-        "search_businesses:ok",
-        "get_contractor:ok"
-      ],
+      "tool_sequence": ["get_permit:ok", "search_businesses:ok", "get_contractor:ok"],
       "evidence": 4,
       "stats": null,
       "cost_usd": null,
@@ -261,11 +228,7 @@
         "Registry and license candidates are exact name matches for review, not verified identities.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "partial_history"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "partial_history"]
     },
     {
       "case": "injection-history",
@@ -281,9 +244,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "get_permit:ok"
-      ],
+      "tool_sequence": ["get_permit:ok"],
       "evidence": 3,
       "stats": null,
       "cost_usd": null,
@@ -296,11 +257,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "partial_history"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "partial_history"]
     },
     {
       "case": "needs-review-78704",
@@ -316,10 +273,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_permits:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_permits:ok"],
       "evidence": 18,
       "stats": null,
       "cost_usd": null,
@@ -333,11 +287,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "no_contractor_printed"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "no_contractor_printed"]
     },
     {
       "case": "no-match",
@@ -353,10 +303,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 2,
       "stats": null,
       "cost_usd": null,
@@ -434,9 +381,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "get_property:ok"
-      ],
+      "tool_sequence": ["get_property:ok"],
       "evidence": 33,
       "stats": null,
       "cost_usd": null,
@@ -470,9 +415,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["search_properties:ok"],
       "evidence": 20,
       "stats": null,
       "cost_usd": null,
@@ -483,9 +426,7 @@
       "assumptions": [
         "Roof clause suppressed (roof_age_min 0, open_permits false) so only owner signals filter results. Search is county-wide (no location filter)."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "readme-two-turn",
@@ -501,10 +442,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 23,
       "stats": null,
       "cost_usd": null,
@@ -516,9 +454,7 @@
         "Roof age basis and confidence are included per record; most fall back to year_built (low confidence). Only properties where the roof criterion is the match reason are shown.",
         "Search center AUSTIN (city, exact match): 129,473 parcels; centroid of 124,832 parcels with situs city AUSTIN (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "readme-two-turn",
@@ -534,10 +470,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_permits:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_permits:ok"],
       "evidence": 23,
       "stats": null,
       "cost_usd": null,
@@ -551,11 +484,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "no_contractor_printed"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "no_contractor_printed"]
     },
     {
       "case": "run-summary",
@@ -571,9 +500,7 @@
       "param_accuracy": 1,
       "id_recall": null,
       "text": null,
-      "tool_sequence": [
-        "get_run_summary:ok"
-      ],
+      "tool_sequence": ["get_run_summary:ok"],
       "evidence": 1,
       "stats": null,
       "cost_usd": null,
@@ -581,9 +508,7 @@
       "prompt_version": "staraptor-agent.prompt.2026-10-21.8",
       "answer_sha256": "20eda5ce7fb95f16",
       "answer_excerpt": "The current data is from pipeline run **20261020T200236Z-t5-full**, which started 2026-10-20 at 20:02 UTC and finished at 23:41 UTC. Its manifest CID is:\n\n`bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy`\n\n- [[run:20261020T200236Z-t5-full]] — Travis County, TX full run, deploy `0b604818b489aff5`, 441,939 properties, 196,028 roofing permits",
-      "assumptions": [
-        "None."
-      ],
+      "assumptions": ["None."],
       "limitations": []
     },
     {
@@ -600,10 +525,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 23,
       "stats": null,
       "cost_usd": null,
@@ -616,9 +538,7 @@
         "State suffix dropped from the place name: \"Austin, TX\" → \"Austin\" (search centers are Travis County names).",
         "Search center AUSTIN (city, exact match): 129,473 parcels; centroid of 124,832 parcels with situs city AUSTIN (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "state-suffix-pflugerville",
@@ -634,10 +554,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 22,
       "stats": null,
       "cost_usd": null,
@@ -650,9 +567,7 @@
         "State suffix dropped from the place name: \"Pflugerville, TX\" → \"Pflugerville\" (search centers are Travis County names).",
         "Search center PFLUGERVILLE (city, exact match): 18,849 parcels; centroid of 18,150 parcels with situs city PFLUGERVILLE (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "text-reroof-hyphen",
@@ -672,9 +587,7 @@
         "precision": 0.5,
         "recall": 0.75
       },
-      "tool_sequence": [
-        "search_permit_text:ok"
-      ],
+      "tool_sequence": ["search_permit_text:ok"],
       "evidence": 34,
       "stats": null,
       "cost_usd": null,
@@ -687,11 +600,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "no_contractor_printed"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "no_contractor_printed"]
     },
     {
       "case": "text-reroof-joined",
@@ -711,9 +620,7 @@
         "precision": 0.47368421052631576,
         "recall": 0.75
       },
-      "tool_sequence": [
-        "search_permit_text:ok"
-      ],
+      "tool_sequence": ["search_permit_text:ok"],
       "evidence": 36,
       "stats": null,
       "cost_usd": null,
@@ -726,11 +633,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review",
-        "no_contractor_printed"
-      ]
+      "limitations": ["http_403_source_block", "needs_review", "no_contractor_printed"]
     },
     {
       "case": "text-reroof-spaced",
@@ -750,9 +653,7 @@
         "precision": 0.4,
         "recall": 0.5
       },
-      "tool_sequence": [
-        "search_permit_text:ok"
-      ],
+      "tool_sequence": ["search_permit_text:ok"],
       "evidence": 29,
       "stats": null,
       "cost_usd": null,
@@ -765,10 +666,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review"
-      ]
+      "limitations": ["http_403_source_block", "needs_review"]
     },
     {
       "case": "typed-coordinates",
@@ -784,9 +682,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["search_properties:ok"],
       "evidence": 20,
       "stats": null,
       "cost_usd": null,
@@ -797,9 +693,7 @@
       "assumptions": [
         "Roof ages are based on year_built (low confidence, partial history) for all results shown, as no higher-confidence roofing permit data overrides them. open_permits set to false so only aged-roof matches are returned."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "zip-78704-aged",
@@ -815,10 +709,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_properties:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_properties:ok"],
       "evidence": 22,
       "stats": null,
       "cost_usd": null,
@@ -830,9 +721,7 @@
         "Roof ages are based on `year_built` (low confidence) for all results shown, as no higher-confidence roofing permit history is available for these properties.",
         "Search center 78704 (zip, exact match): 15,281 parcels; centroid of 9,412 parcels with situs ZIP 78704 (those with coordinates); distances are measured from that centroid."
       ],
-      "limitations": [
-        "partial_history"
-      ]
+      "limitations": ["partial_history"]
     },
     {
       "case": "zip-78745-stalled-many-years",
@@ -848,10 +737,7 @@
       "param_accuracy": 1,
       "id_recall": 1,
       "text": null,
-      "tool_sequence": [
-        "resolve_search_center:ok",
-        "search_permits:ok"
-      ],
+      "tool_sequence": ["resolve_search_center:ok", "search_permits:ok"],
       "evidence": 8,
       "stats": null,
       "cost_usd": null,
@@ -865,10 +751,7 @@
         "Contractors are the listed contractor as printed on the permit, not a verified identity.",
         "Open durations are computed as of 2026-10-21."
       ],
-      "limitations": [
-        "http_403_source_block",
-        "needs_review"
-      ]
+      "limitations": ["http_403_source_block", "needs_review"]
     }
   ]
 }
