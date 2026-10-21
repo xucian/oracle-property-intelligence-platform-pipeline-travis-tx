@@ -16,8 +16,8 @@
           {
             "name": "search_permits",
             "args": {
-              "lat": 30.361708811952553,
-              "lon": -97.98169817685717,
+              "lat": 30.361708811952575,
+              "lon": -97.98169817685725,
               "radius_miles": 2
             }
           }
@@ -32,6 +32,6 @@
       }
     }
   ],
-  "computed_on": "deploy e17c90aa0b91ccae",
-  "built_at": "2026-10-20"
+  "computed_on": "deploy 8191073a04a47541",
+  "built_at": "2026-10-21"
 }

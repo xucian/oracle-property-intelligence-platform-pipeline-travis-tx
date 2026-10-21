@@ -18,8 +18,8 @@
           {
             "name": "search_properties",
             "args": {
-              "lat": 30.291378194234046,
-              "lon": -97.77740571657456,
+              "lat": 30.29137819423411,
+              "lon": -97.77740571657483,
               "radius_miles": 5,
               "roof_age_min": 15,
               "open_permits": false
@@ -51,12 +51,12 @@
             "103369",
             "136312"
           ],
-          "total": 50260,
+          "total": 50258,
           "computed_by": "independent SQL over the serving Parquet files"
         }
       }
     }
   ],
-  "computed_on": "deploy e17c90aa0b91ccae",
-  "built_at": "2026-10-20"
+  "computed_on": "deploy 8191073a04a47541",
+  "built_at": "2026-10-21"
 }

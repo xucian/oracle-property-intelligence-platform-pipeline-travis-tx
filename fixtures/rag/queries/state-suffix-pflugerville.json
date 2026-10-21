@@ -18,8 +18,8 @@
           {
             "name": "search_properties",
             "args": {
-              "lat": 30.453165507119138,
-              "lon": -97.60683596548294,
+              "lat": 30.453165507119216,
+              "lon": -97.6068359654829,
               "radius_miles": 5,
               "roof_age_min": 15,
               "open_permits": false
@@ -57,6 +57,6 @@
       }
     }
   ],
-  "computed_on": "deploy e17c90aa0b91ccae",
-  "built_at": "2026-10-20"
+  "computed_on": "deploy 8191073a04a47541",
+  "built_at": "2026-10-21"
 }
