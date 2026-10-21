@@ -2275,3 +2275,23 @@ Before submission the operator ruled that the search API needs a daily stop, not
 - **The `project_name` cost-allocation tag** (section 21 says it is activated) was found inactive in billing on
   2026-10-21 and activated then; Cost Explorer can filter by it from that date only, so the PR's cost figures come from
   the account's bill with credits excluded, not from the tag.
+
+## 35. 2026-10-21: `GET /` answers 200 JSON, outside the contract
+
+Both PR descriptions link the bare API_BASE (`https://733jzm4xv4.execute-api.us-east-2.amazonaws.com`); a reviewer who
+clicked it got `404 {"error":"not_found"}`.
+
+- **Behaviour.** The app answers `GET /` before routing (after the `OPTIONS` preflight) with `200
+  {status: "ok", service, version, openapi: "/v1/openapi.json", request_id}` and `x-request-id`; `service` and `version`
+  are `openapi.json`'s `info.title` and `info.version`, so they follow the served contract. JSON only, no page. It never
+  opens the query layer and, like a preflight, records no query metric (API Gateway's access log still has it). The kill
+  switch still applies: while the API flag is set, `/` answers `503` like every other path (section 34). Other methods
+  on `/` and every other unknown path still answer `404 not_found`.
+- **Not in the contract.** Contract v1 is frozen (section 21) and the CRM's check that the live contract equals its
+  pinned copy fails if a path is added, so `/` is in neither `ENDPOINTS` nor `openapi.json`; a test asserts both. No CDK
+  change: the HTTP API's default integration (`$default`) already sends `/` to the API function.
+- **Live, 2026-10-21.** Deployed 09:58Z (`scripts/deploy-api.sh`, code only: one new image layer, no IAM change).
+  `GET /` answered 200 with that body in 26 ms and 13 ms at API Gateway (instances the deploy's warm-up had just opened;
+  no cold start was measured); `/v1/openapi.json` stayed byte-identical (150,244 bytes, SHA-256 `7d8ece68…`, the same
+  before and after the deploy and equal to `packages/contract/openapi.json`); `/v1/nothing` and `POST /` answered 404;
+  `/v1/meta` 200.

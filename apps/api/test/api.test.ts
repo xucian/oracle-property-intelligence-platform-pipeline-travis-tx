@@ -310,6 +310,33 @@ describe.skipIf(!fixtureExists())('REST router and MCP endpoint on the fixture d
   });
 });
 
+// Both PR descriptions link the bare API_BASE, which `$default` sends here; contract v1 is frozen, so `/` is not in it.
+describe('GET /', () => {
+  const app = new App({
+    queries: () => Promise.reject(new Error('GET / must not open the query layer')),
+  });
+  it('answers 200 JSON with the service, the contract version and where openapi.json is', async () => {
+    const res = await app.handle(get('/'));
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
+    expect(res.headers['x-request-id']).toBe('req-1');
+    expect(JSON.parse(res.body)).toEqual({
+      status: 'ok',
+      service: 'Travis County property intelligence API',
+      version: '1.0.0',
+      openapi: '/v1/openapi.json',
+      request_id: 'req-1',
+    });
+  });
+  it('stays out of the contract, and other unknown paths still answer 404', async () => {
+    expect(ENDPOINTS.some((e) => e.path === '/')).toBe(false);
+    expect(Object.keys(JSON.parse(OPENAPI_JSON).paths)).not.toContain('/');
+    const nf = await app.handle(get('/v1/nothing'));
+    expect(nf.statusCode).toBe(404);
+    expect(JSON.parse(nf.body)).toEqual({ error: 'not_found', request_id: 'req-1' });
+  });
+});
+
 // The HTTP API's `$default` route also catches CORS preflights, so they reach this app; API Gateway adds the configured
 // CORS headers to its answer, but the browser rejects a preflight whose status is not 2xx (the Agent tab's POST, live).
 describe('CORS preflight', () => {

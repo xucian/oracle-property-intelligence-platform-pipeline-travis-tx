@@ -43,6 +43,14 @@ const nullObserver: Observer = { record: () => {}, error: () => {} };
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
+const { info } = JSON.parse(OPENAPI_JSON) as { info: { title: string; version: string } };
+const ROOT = {
+  status: 'ok',
+  service: info.title,
+  version: info.version,
+  openapi: ENDPOINTS.find((e) => e.operationId === 'getOpenApi')!.path,
+};
+
 type Handler = (q: Queries, input: any) => Promise<unknown>;
 
 const REST_OPS: Record<string, Handler> = {
@@ -168,6 +176,9 @@ export class App {
     // `$default` catches CORS preflights too; API Gateway adds the configured CORS headers, the status must be 2xx
     if (req.method === 'OPTIONS')
       return { statusCode: 204, headers: { 'x-request-id': req.requestId }, body: '' };
+    // the bare API_BASE link; contract v1 is frozen, so `/` is answered here and never added to it
+    if (req.method === 'GET' && req.path === '/')
+      return this.json(200, { ...ROOT, request_id: req.requestId }, req.requestId);
     const t0 = performance.now();
     let operation = 'unrouted';
     let res: HttpResponse;
