@@ -639,8 +639,8 @@ the contract changes are dated in `api-contract.md`'s change control.
   case.
 - **Personal data.** The agent's view of `get_property` and `get_permit` omits `owner_name`, `mailing_address`,
   `applicant` and the contractor's phone unless the question asks about ownership or contact. Logs and traces carry
-  ids, counts and hashes only; LangSmith hides person fields. CloudWatch logs are kept 90 days (section 21); LangSmith retention
-  is the plan's and is recorded at T9. The section 13 fallback adds a processor outside AWS and is recorded as such.
+  ids, counts and hashes only; LangSmith hides person fields. CloudWatch logs are kept 90 days (section 21); LangSmith keeps
+  traces 14 days (free Developer plan, base traces; recorded 2026-10-21). The section 13 fallback adds a processor outside AWS and is recorded as such.
 - **Stateless chat.** HTTP ingress with no Chat SDK state: the kit's `ConversationEventStore` interface with its
   `NoopConversationEventStore`, so AgentCore Memory can be added later without a contract change. Tool results do
   not carry between turns; follow-ups work through the history the client sends, and the golden set covers it.
@@ -2100,7 +2100,7 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   retried after 5 minutes. Person fields are hidden by key in every traced input and output, and the person values a
   personal view returned in a turn are hidden in any traced text, the model's answer included (checked in LangSmith:
   `owner_name` and `mailing_address` read `[hidden]`). Traces from the local replay and from SAM local arrived with model
-  and tool child runs. LangSmith's trace retention is the plan's; the operator records it.
+  and tool child runs. LangSmith keeps traces 14 days (free Developer plan, base traces; recorded 2026-10-21).
 - **Name (ruling 3).** `staraptor-agent` names `LANGSMITH_PROJECT`, the chat function's Powertools service and its metrics
   namespace (was `travis-chat` in `TravisPropertyIntelligence`). The alarms are unaffected: the chat error-rate, daily-usage
   and throttle alarms read `AWS/Lambda` metrics and the flag alarm reads `ChatBudgetFlagSet`, which the flag setter writes
