@@ -3,8 +3,9 @@
 Everything the operator runs, in order, with the exact commands. Paths are absolute for this
 machine; the kit checkout on branch `travis` is `/Users/luti/dev/ateam/role1-prism/kit-travis`
 (the plugin checkout `/Users/luti/dev/ateam/role1-prism/kit` stays at the pin on `main` and is
-never modified). The Travis files are mirrored under `oracle/travis/` here; `oracle/travis/apply-to-kit.sh`
-rebuilds them into any kit checkout at `99c7bff`.
+never modified). The Travis files are in the pinned kit mirror
+(`oracle/travis/MIRROR_REPO` at `MIRROR_COMMIT`); `oracle/travis/apply-to-kit.sh`
+clones that SHA and rebuilds them into any kit checkout at `99c7bff`.
 
 Increment state is in `docs/progress.md`. The stop-per-increment rule applies: T1 is handed to
 the operator; nothing below past T1 runs until the operator has run T1 and replied.
@@ -262,7 +263,7 @@ the sole-owner outlets (decisions.md 24.2). Keep one copy in your password manag
 ### Hand-off checklist (offline, about 12 minutes)
 
 Run in `/Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`; nothing is sent. Not in this repo's
-mirror `oracle/travis/kit/…/runtime`: it holds the code only, with no `node_modules` and no `data/`.
+mirror (`travis-county-oracle-kit` `kit/…/runtime`): it holds the code only, with no `node_modules` and no `data/`.
 
 1. `for r in 20261017T160716Z 20261017T192341Z; do node src/counties/travis/t3-verify.mjs --run $r | tail -1; done` →
    `t3-verify: OK; 112 files, 112 receipts, 4,460,985 CSV rows, 888.0 MB; run <r>`, once per run. Without `| tail -1`,

@@ -92,8 +92,9 @@ this plan and what was not. The API shared with the CRM is in [`api-contract.md`
   `query-table`, `validate`, enrichment profile), developed on branch `travis` of a kit checkout pinned at
   `99c7bff`. The adapter sources, the findings, `skills/use-oracle/runtime/docs/travis-sources.yaml`, the Texas
   contractor-identity note, the seed-producing script and a replay fixture under 1 MB (`fixtures/travis-replay/`,
-  with a few-row `seed.csv`) are **mirrored into this repository under `oracle/travis/`** with a script that
-  copies them into a kit checkout, so a reviewer can rerun from this PR. The full seed CSV, captures, hashed
+  with a few-row `seed.csv`) are **mirrored in [`xucian/travis-county-oracle-kit`](https://github.com/xucian/travis-county-oracle-kit)**
+  and pinned from this PR by `oracle/travis/MIRROR_COMMIT`, with a script that clones that SHA and
+  copies them into a kit checkout, so a reviewer can rerun without this PR carrying ~180 kit files. The full seed CSV, captures, hashed
   output, CARs and Parquet are never committed, here or in the kit. At `99c7bff` the runtime's `.gitignore`
   does not cover `data/` (`bootstrap-oracle-infra` describes it as ignored, but `git check-ignore` matches
   nothing), so the first commit on the `travis` branch adds `data/` to `skills/use-oracle/runtime/.gitignore`

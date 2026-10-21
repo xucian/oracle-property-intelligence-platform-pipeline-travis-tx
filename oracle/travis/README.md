@@ -1,16 +1,18 @@
-# Travis county modules (mirror of the kit branch `travis`)
+# Travis county modules
 
 The Travis County adapter lives on branch `travis` of a `soofi-xyz-team-kit` checkout pinned at
-`99c7bff` (decisions.md section 3). This directory mirrors every Travis-specific file so a reviewer
-can rebuild that branch from this repository:
+`99c7bff` (decisions.md section 3). The adapter sources, evidence, replay fixture and apply scripts
+are **not inlined here** (they are ~180 files). They live in a public repo, pinned by SHA:
 
-- `kit-files.txt`: the mirrored paths (relative to the kit root).
-- `kit/`: the files, at the same relative paths.
-- `kit-core.patch`: the two-line kit changes (the `--county travis` registration in
-  `bin/elephant-county.mjs` and the `data/` line in the runtime `.gitignore`).
-- `KIT_COMMIT`: the kit commit the mirror was taken from.
-- `refresh-from-kit.sh <kit>`: refresh the mirror from the kit checkout.
-- `apply-to-kit.sh <kit>`: copy the mirror into a kit checkout at `99c7bff` and apply the patch.
+- Mirror: https://github.com/xucian/travis-county-oracle-kit
+- Pin: `MIRROR_COMMIT` (`29b46379aef7a7e3f72cc4aa6d61e23928df411b`)
+- Kit pin the mirror was taken from: `KIT_COMMIT`
+
+That split keeps this assignment PR under CodeRabbit's 300-file cap. Nothing was dropped: the
+mirror has the full `oracle/travis/` git history. Clone that SHA, not `main`.
+
+This directory still holds the pin files, `kit-files.txt` (the path list), `kit-core.patch` (the
+two-line kit registration), and `apply-to-kit.sh` (clones the pin, then copies into a kit checkout).
 
 Rerun from a clean clone:
 

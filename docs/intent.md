@@ -34,7 +34,7 @@ each increment was verified, and `docs/runbook.md` how to run it again from a cl
   costs are the two pinning plans and about $2 a month of storage.
 
 As both Oracle and builder: we ran the ingestion, published and pinned the data and pay for the pinning. We also built
-the Travis adapter in the kit (mirrored under `oracle/travis/`) and the hosted layer in this repository.
+the Travis adapter in the kit (pinned kit mirror: [`xucian/travis-county-oracle-kit`](https://github.com/xucian/travis-county-oracle-kit) at `oracle/travis/MIRROR_COMMIT`) and the hosted layer in this repository.
 
 ## Boundaries
 
