@@ -746,17 +746,25 @@ not to repeat):
 
 ### Checks (about 5 minutes)
 
-1. **Both runs in the run history.** Explorer, Run history tab (or `curl -s "$API_BASE/v1/runs"`): run
-   `20261020T200236Z-t5-full` with `previous_run` 20261018T143520Z-t5-full, permits deltas 232 new and 3,662 changed, 177
-   group roots; run `20261018T143520Z-t5-full` with its own 177 roots.
-2. **The prior CID still resolves; the new run has its own** (README line 101). Each command prints the manifest's SHA-256:
+Run 1 is `20261018T143520Z-t5-full`, run 2 is `20261020T200236Z-t5-full`.
+
+1. **Both runs are listed.** Open the [explorer](https://d2n7ef6folp70l.cloudfront.net), tab **Run history**. You should see
+   two full runs, newest first (plus the small pilot). Run 2 says it follows run 1 and shows 232 new and 3,662 changed permits.
+   Raw: [`/v1/runs`](https://733jzm4xv4.execute-api.us-east-2.amazonaws.com/v1/runs).
+2. **Run 1's CID still resolves and run 2 has its own** (README line 101). Each link opens a run's manifest from a public
+   gateway; all four should open as JSON:
+   - run 1: [Filebase](https://ipfs.filebase.io/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4),
+     [Pinata](https://gateway.pinata.cloud/ipfs/bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4)
+   - run 2: [Filebase](https://ipfs.filebase.io/ipfs/bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy),
+     [Pinata](https://gateway.pinata.cloud/ipfs/bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy)
+
+   Optional byte check in a terminal (prints `4a0f3231ed71` for run 1 and `8cf695be464a` for run 2, on both gateways):
    ```bash
-   for c in bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4 bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy; do for g in https://ipfs.filebase.io https://gateway.pinata.cloud; do echo "$g $c $(curl -s "$g/ipfs/$c" | shasum -a 256 | cut -c1-12)"; done; done
+   for c in bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4 bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy; do for g in https://ipfs.filebase.io https://gateway.pinata.cloud; do echo "$g ${c:0:12} $(curl -s "$g/ipfs/$c" | shasum -a 256 | cut -c1-12)"; done; done
    ```
-   → run 1 `4a0f3231ed71` on both gateways, run 2 `8cf695be464a` on both.
-3. **One changed shard: old and new root.** Property Improvement s0001 was
-   `baguqeeraapcmfezjev6ux3twbhdaza5iykl5tj7ukriyravy3yn5b7cp6ueq` in run 1 and is
-   `baguqeerad7hc5fqgzaxbbsnar3kevtwlmepczgsbze2quhhhpmcu7qiwwn2q` in run 2; its County root is the same in both. In the
-   explorer's Manifest tab, pick each run and find `property_improvement/s0001`.
-4. **The CAR releases.** https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases: run 1's
-   with 354 CARs, run 2's with its 156 new CARs.
+3. **A changed shard got a new CID; an unchanged one kept its CID.** Explorer, tab **Manifest**, pick a run in the selector and
+   search `property_improvement/s0001`: run 1 lists `…cp6ueq`, run 2 lists `…qiwwn2q`. Search `county/s0001`: the same CID in
+   both runs (County records did not change).
+4. **The CAR files are downloadable.** [Run 1's release](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases/tag/run-20261018T143520Z-t5-full)
+   has 354 files; [run 2's release](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases/tag/run-20261020T200236Z-t5-full)
+   has 156 (only its new CARs; unchanged ones stay in run 1's).
