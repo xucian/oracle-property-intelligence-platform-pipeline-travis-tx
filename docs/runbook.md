@@ -730,3 +730,33 @@ aws logs filter-log-events --region us-east-2 --log-group-name "$(out ChatLogGro
 
 Pass: one JSON line with `"message":"chat turn"`, `outcome`, `steps`, `input_tokens`, `output_tokens`,
 `cache_read_tokens` and `turn_ms`, ids and hashes only (no question or answer text).
+
+## 11. T10 — run 2, the incremental next run (decisions.md section 33)
+
+How run 2 was made (kit runtime, `/Users/luti/dev/ateam/role1-prism/kit-travis/skills/use-oracle/runtime`; for the record,
+not to repeat):
+
+1. `node src/counties/travis/t4-permit-fetch.mjs` → a newer capture (`v1792499798`), then `t4-permit-verify.mjs`.
+2. `node --max-old-space-size=12288 src/counties/travis/t5-run.mjs --cli <assignment>/node_modules/.bin/elephant-cli
+   --eligibility __ALL__ --label full --next-run latest --capture data/travis/permits/v1792499798` (if it stops, the same
+   command without `--next-run` resumes it).
+3. `src/counties/travis/t10-publish.sh 20261020T200236Z-t5-full` (only new roots; resumes on rerun).
+4. In this repository: `npm run build-db -w @travis/deploy-build`, `scripts/deploy-api.sh`,
+   `/usr/bin/python3 -I scripts/release-cars.py <run id>` per run.
+
+### Checks (about 5 minutes)
+
+1. **Both runs in the run history.** Explorer, Run history tab (or `curl -s "$API_BASE/v1/runs"`): run
+   `20261020T200236Z-t5-full` with `previous_run` 20261018T143520Z-t5-full, permits deltas 232 new and 3,662 changed, 177
+   group roots; run `20261018T143520Z-t5-full` with its own 177 roots.
+2. **The prior CID still resolves; the new run has its own** (README line 101). Each command prints the manifest's SHA-256:
+   ```bash
+   for c in bafybeid6jqqzpo2ods6iehz5vgud2ust4fykfiozspzxb3xjmqiup36ud4 bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy; do for g in https://ipfs.filebase.io https://gateway.pinata.cloud; do echo "$g $c $(curl -s "$g/ipfs/$c" | shasum -a 256 | cut -c1-12)"; done; done
+   ```
+   → run 1 `4a0f3231ed71` on both gateways, run 2 `8cf695be464a` on both.
+3. **One changed shard: old and new root.** Property Improvement s0001 was
+   `baguqeeraapcmfezjev6ux3twbhdaza5iykl5tj7ukriyravy3yn5b7cp6ueq` in run 1 and is
+   `baguqeerad7hc5fqgzaxbbsnar3kevtwlmepczgsbze2quhhhpmcu7qiwwn2q` in run 2; its County root is the same in both. In the
+   explorer's Manifest tab, pick each run and find `property_improvement/s0001`.
+4. **The CAR releases.** https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/releases: run 1's
+   with 354 CARs, run 2's with its 156 new CARs.

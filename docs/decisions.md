@@ -2198,3 +2198,52 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   coordinates)"), since the model quotes `parcel_count` beside the basis's coordinate count (`5956f22`). The Agent tab
   answered both README prompts; LangSmith thread `5y4r0251415l0l2a4p0v0q65` holds both turns with their model and tool
   child runs and no error; the `chat turn` log line carries ids, hashes, tokens and timings only.
+
+## 33. 2026-10-20/21: T10 — run 2 is an incremental next run, not a second full run
+
+- **Why not a full rerun** (the operator's question, 2026-10-20). Run 1's 12.2 h was CPU, not download or VPN: of 104
+  shard-hours, `elephant-cli validate` of the County group took 71.6 (45 min per 5,000-parcel shard); source acquisition took
+  0.09 h. The README asks run 2 for an incremental, windowed refresh (lines 19, 40-42, 101), and the kit's model is a new
+  immutable snapshot that reuses byte-identical property artifacts (`use-oracle` reference `continuous-ingestion.md:147`,
+  `continuous-safe-optimization.md:116`). Section 27.9 C and 27.18 assumed run 2 "reruns everything"; that is superseded.
+- **Window.** The permit export is republished whole every day (`:updated_at` is after 2026-10-19 on every row), so change
+  detection is by content: a fresh capture (`v1792499798`, rowsUpdatedAt 2026-10-20T12:36:38Z, 2,380,939 rows, verified, from
+  RO egress; the host answers any country) against run 1's. Permits only: TCAD's later roll (`travis_SUPP 335`, 511 MB,
+  2026-10-08, a different "website export" layout) is the next window, recorded as a limitation; TCAD also answers from RO.
+- **Mechanism** (kit `54d1d14`, `c3cc36a`): `t5-run.mjs --next-run latest --capture <newer>` clones the finished run
+  (clonefile(2) per shard, copy-on-write: no disk, run 1 untouched) under a new run id and reruns every stage whose input
+  changed. County chains are carried (their input is the County records' digest; the lexicon manifest is unchanged,
+  `7084b933…`); a shard reruns its Property Improvement chain only when its published permit records changed; merges and
+  the Loader finalize always rerun (generation 2, deltas against run 1). The record names `previous_run`,
+  `changed_since_previous` and the carried stages (left out of the timings). A test proves it on the fake CLI.
+- **Run 2** `20261020T200236Z-t5-full` (2026-10-20 20:02Z to 2026-10-21 00:47Z; clone 0.7 h, processing 2.9 h, 8 in flight):
+  441,961 = 441,939 ready + 22 dead + 0 invalid. County 89 of 89 archives carried (same CIDs); Property Improvement 78 of 88
+  archives new, 10 carried. Loader deltas: permits 232 new, 3,662 changed, 2,377,045 unchanged, 0 removed; parcels with
+  permits 9 new, 394 changed. Published permits 1,986,694 (run 1: 1,986,484); roof age on 390,215 (12,200 high, 96,608
+  medium, 281,407 low) as of 2026-10-20.
+- **Publication** (`t10-publish.sh`, kit `b6a51a8`; `t6-publish.mjs plan --previous`): only the 156 new roots were uploaded
+  with readback (546 new parts, 4.48 GB; attempt 1 stopped on 3 network errors for one upload, the same command resumed;
+  2 retries); Filebase pins all 3,283 CIDs; Filebase gateway 702 of 702 new objects matched; Pinata gateway 253 matched
+  before its hourly quota, the rest paced in the background as in run 1; Pinata pins 353 of 354 roots (1 retrieving). The
+  198 carried roots keep run 1's CIDs and evidence. Manifest `bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy`
+  (3,285 objects, 354 CARs, each CAR with its `release_tag`; `previous_run` names run 1's manifest), pinned on both vendors,
+  matched on both gateways. Record `runs/20261020T200236Z-t5-full.publication.json`.
+- **Kit coalescing rule.** The kit holds publication until the loaded delta exceeds max(10,000 rows, 1%) unless the user
+  explicitly requests it (`continuous-safe-optimization.md:120`). Run 2's 3,894 changed rows are below it; the operator
+  requested this publication because README lines 19, 42 and 101 require a later incremental publish.
+- **Hosted layer.** `deploy-build` serves run 2: run id (`TRAVIS_RUN_ID` overrides), capture, link-pass directory and as-of
+  date read from the run's record and markers (they were run 1's constants; the first build caught the stale as-of date
+  through its own count gates); the count gates come from the served record (run 1's still equals the T5 constants);
+  `/v1/runs` shows each run's roots from its own manifest (run 1 showed none). Deploy `8191073a04a47541` (4.1 GB), deployed
+  2026-10-21 04:10Z (`scripts/deploy-api.sh`, code only). Live: `/v1/meta` serves run 2; `/v1/runs` lists run 2 (177 roots,
+  `previous_run`, deltas), run 1 (177 roots) and the pilot; run 2's manifest served byte-identical (`8cf695be…`); CRM search
+  200 in 2.0 s; MCP `structuredContent`; the README's first agent prompt 200 in 6.9 s, citing run 2. The golden set was not
+  replayed on run 2 (its permit-dependent expected totals are computed on deploy `e17c90aa0b91ccae`).
+- **CAR releases** (README lines 68 and 70; section 28.6): `scripts/release-cars.py` stages each CAR by the manifest's size
+  and SHA-256, uploads to a draft release and publishes it only when GitHub's digest of every asset equals the manifest.
+  Run 1: release `run-20261018T143520Z-t5-full`, 354 assets, 10.03 GB, all equal, published 2026-10-21. Run 2: release
+  `run-20261020T200236Z-t5-full` with its 156 new CARs; the carried CARs stay in run 1's release.
+- **Section 29's open question answered (address text).** The published archives hold the address text (`address.json`:
+  `unnormalized_address`, city, ZIP, coordinates and the TCAD source URL; checked on shard s0001); only the CLI's
+  `export-tables` (1.58.1) leaves those columns out of the `address` table. The API's situs text comes from the same TCAD
+  capture; the address record's CID, served beside it, resolves to the published text. Recorded as a limitation; no code change.
