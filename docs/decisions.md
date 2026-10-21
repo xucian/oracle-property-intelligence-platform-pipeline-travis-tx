@@ -2224,7 +2224,8 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
 - **Publication** (`t10-publish.sh`, kit `b6a51a8`; `t6-publish.mjs plan --previous`): only the 156 new roots were uploaded
   with readback (546 new parts, 4.48 GB; attempt 1 stopped on 3 network errors for one upload, the same command resumed;
   2 retries); Filebase pins all 3,283 CIDs; Filebase gateway 702 of 702 new objects matched; Pinata gateway 253 matched
-  before its hourly quota, the rest paced in the background as in run 1; Pinata pins 353 of 354 roots (1 retrieving). The
+  before its hourly quota, the rest paced in the background as in run 1 (finished 2026-10-21 06:42Z: 702 of 702 matched,
+  0 mismatched, 0 unverified; `runs/20261020T200236Z-t5-full.gateway-checks-pinata.json`); Pinata pins 353 of 354 roots (1 retrieving). The
   198 carried roots keep run 1's CIDs and evidence. Manifest `bafybeicj4vw5hgntnmwl2cie5txpe7esn4y3ygsqoau3hzqk5ipsz6xhqy`
   (3,285 objects, 354 CARs, each CAR with its `release_tag`; `previous_run` names run 1's manifest), pinned on both vendors,
   matched on both gateways. Record `runs/20261020T200236Z-t5-full.publication.json`.
@@ -2237,8 +2238,12 @@ The operator's rulings of 2026-10-20 on the T9 brief, and what the build measure
   `/v1/runs` shows each run's roots from its own manifest (run 1 showed none). Deploy `8191073a04a47541` (4.1 GB), deployed
   2026-10-21 04:10Z (`scripts/deploy-api.sh`, code only). Live: `/v1/meta` serves run 2; `/v1/runs` lists run 2 (177 roots,
   `previous_run`, deltas), run 1 (177 roots) and the pilot; run 2's manifest served byte-identical (`8cf695be…`); CRM search
-  200 in 2.0 s; MCP `structuredContent`; the README's first agent prompt 200 in 6.9 s, citing run 2. The golden set was not
-  replayed on run 2 (its permit-dependent expected totals are computed on deploy `e17c90aa0b91ccae`).
+  200 in 2.0 s; MCP `structuredContent`; the README's first agent prompt 200 in 6.9 s, citing run 2. The golden set's
+  expected values were then recomputed on run 2 and replayed live (`f076996`, result `20261021T060832Z`, 23 cases, 25
+  turns): hard gates 25/25 and 25/25, outcome accuracy 0.96, parameter accuracy 1.000, p95 9.4 s, README turns 7.3 s and
+  10.1 s. The one miss is the `alias-westlake` follow-up: both tools succeeded, the citation check refused the model's
+  answer (`citation_failures: 1`, `cited: 0` in its log line), and the turn returned `tool_error` with no model text,
+  the fail-closed path. Not fixed; the PR states it.
 - **CAR releases** (README lines 68 and 70; section 28.6): `scripts/release-cars.py` stages each CAR by the manifest's size
   and SHA-256, uploads to a draft release and publishes it only when GitHub's digest of every asset equals the manifest.
   Run 1: release `run-20261018T143520Z-t5-full`, 354 assets, 10.03 GB, all equal, published 2026-10-21. Run 2: release
