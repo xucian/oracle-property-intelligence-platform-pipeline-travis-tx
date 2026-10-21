@@ -8,6 +8,8 @@ import { fmtInt } from '../lib/format.js';
 
 type Mode = 'aging' | 'permits' | 'tenure' | 'owners' | 'text';
 
+const REPLACEMENTS_AND_REPAIRS = ['primary_roof_replacement', 'repair_or_coating'] as const;
+
 const MODES: { id: Mode; label: string }[] = [
   { id: 'aging', label: 'Roofs older than N years' },
   { id: 'permits', label: 'Open and stalled roofing permits' },
@@ -30,6 +32,7 @@ interface Submitted {
   tenure: number;
   owners: 'absentee' | 'out_of_area';
   text: string;
+  repairsOnly: boolean;
   cursor?: string;
   nonce: number;
 }
@@ -59,6 +62,7 @@ export function Search() {
   const [tenure, setTenure] = useState(10);
   const [owners, setOwners] = useState<'absentee' | 'out_of_area'>('absentee');
   const [text, setText] = useState('re-roof');
+  const [repairsOnly, setRepairsOnly] = useState(true);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
 
   async function findPlace(e: FormEvent) {
@@ -94,6 +98,7 @@ export function Search() {
       const s = submitted as Submitted;
       const at = s.center ? { lat: s.center.lat, lon: s.center.lon, radius_miles: s.radius } : {};
       const base = (cursor: string | undefined) => ({ ...at, limit: 50, cursor });
+      const workClass = s.repairsOnly ? { roof_work_class: [...REPLACEMENTS_AND_REPAIRS] } : {};
       if (s.mode === 'permits' || s.mode === 'text') {
         const fetchPermits = (cursor: string | undefined) =>
           s.mode === 'permits'
@@ -101,6 +106,7 @@ export function Search() {
                 ...base(cursor),
                 status_group: ['open', 'stalled'],
                 roofing_only: true,
+                ...workClass,
               })
             : api.searchPermitText({ ...base(cursor), q: s.text });
         return { kind: 'permit' as const, ...(await pageWithRestart(fetchPermits, s.cursor)) };
@@ -110,6 +116,7 @@ export function Search() {
           ...base(cursor),
           roof_age_min: s.mode === 'aging' ? s.roofAge : 0,
           open_permits: false,
+          ...workClass,
           ...(s.mode === 'tenure' ? { owner_tenure_min: s.tenure } : {}),
           ...(s.mode === 'owners'
             ? s.owners === 'absentee'
@@ -123,7 +130,17 @@ export function Search() {
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    setSubmitted({ mode, center, radius, roofAge, tenure, owners, text, nonce: Date.now() });
+    setSubmitted({
+      mode,
+      center,
+      radius,
+      roofAge,
+      tenure,
+      owners,
+      text,
+      repairsOnly,
+      nonce: Date.now(),
+    });
   }
 
   const result = query.data;
@@ -199,7 +216,16 @@ export function Search() {
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
-          ) : null}
+          ) : (
+            <label>
+              <input
+                type="checkbox"
+                checked={repairsOnly}
+                onChange={(e) => setRepairsOnly(e.target.checked)}
+              />{' '}
+              Replacements and repairs only (no accessory roofs or new construction)
+            </label>
+          )}
         </fieldset>
 
         <fieldset>

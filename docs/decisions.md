@@ -2383,3 +2383,18 @@ parameter (`pagerDutyUrlParam`); the URL is resolved from SSM at deploy and is n
 infrastructure only: the image did not change). PagerDuty confirmed the subscription, and a test on the API errors alarm
 (ALARM 13:00:26Z, OK 13:01:12Z; not a budget alarm, so no kill switch) delivered 7 notifications with 0 failed. A CDK
 test asserts the HTTPS subscription and its SSM parameter.
+
+## 39. 2026-10-21: roofing leads default to replacements and repairs; DuckDB-WASM reads parts by CID
+
+The pre-video slowking dry run found the lead screens and the agent led with accessory roofs and new construction. The
+explorer's lead queries now default to `roof_work_class` primary_roof_replacement and repair_or_coating (a ticked box;
+untick it for all four roofing classes): near Austin at 5 mi, open and stalled roofing permits go from 3,490 to 635. The
+agent's prompt (`.8`) does the same for open-roofing-permit questions, states it as an assumption, gives the total
+first and lists at most five records (was three). The golden set's three open-permit turns expect the filter, with ids
+from the independent SQL filtered the same way (the README's second question: 11 permits, was 110). Live replay
+`20261021T133951Z`: hard gates 25/25, outcome accuracy 1.00, parameter accuracy 0.96, p50 8.0 s, p95 11.9 s.
+
+The explorer's DuckDB-WASM box can read each Parquet part straight from `ipfs.filebase.io/ipfs/<part CID>` instead of
+the same-origin mirror (Filebase answers range requests with open CORS). Deployed 13:37Z (explorer) and 13:39Z (API,
+agent prompt only; the served contract is unchanged, SHA-256 `6ff17f6c…`). The Titan embeddings computed for R5 stay
+an unused local cache (section 37).

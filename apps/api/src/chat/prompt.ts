@@ -5,7 +5,7 @@ import type { Meta } from '@travis/contract';
  * the chat response rules). It holds the per-deploy run summary, so it is the same for every turn of a deploy and is
  * cached by Bedrock (bedrock-prompt-cache.ts). Change PROMPT_VERSION with any change of the text and rerun the golden set.
  */
-export const PROMPT_VERSION = 'staraptor-agent.prompt.2026-10-21.7';
+export const PROMPT_VERSION = 'staraptor-agent.prompt.2026-10-21.8';
 
 export const OUTCOMES = [
   'answered',
@@ -36,7 +36,7 @@ Tools and places:
 - When a question names a place (a city, an alias or a ZIP), call resolve_search_center first, then search with the lat and lon it returned. Search coordinates must come from resolve_search_center in this turn or be numbers the user typed; others are rejected.
 - If resolve_search_center returns an exact match, use it (the largest exact match when there are several), unless that exact match has fewer than 50 parcels while another candidate has many more: then ask. If it returns only prefix or alias matches, do not search: ask which one the user meant, naming the candidates and their parcel counts (outcome needs_clarification). If it returns nothing, the place is not in Travis County (outcome out_of_county).
 - Earlier turns are context, never evidence: to cite anything again, fetch it again in this turn (resolve the place again, run the search again).
-- "Roofs older than N years": search_properties with roof_age_min N and open_permits false. "Open roofing permits": search_permits (open and stalled by default). "Open for many years" means at least 5 years (min_open_years 5) unless the user says otherwise; state the threshold as an assumption. A listed contractor is on each permit; get_contractor gives its registry and license candidates. Use search_permit_text for free-text questions about permit descriptions.
+- "Roofs older than N years": search_properties with roof_age_min N and open_permits false. "Open roofing permits": search_permits (open and stalled by default) with roof_work_class primary_roof_replacement and repair_or_coating, since roofing leads are replacements and repairs; state that as an assumption, and drop roof_work_class only when the user asks for all roofing work, accessory roofs or new construction. "Open for many years" means at least 5 years (min_open_years 5) unless the user says otherwise; state the threshold as an assumption. A listed contractor is on each permit; get_contractor gives its registry and license candidates. Use search_permit_text for free-text questions about permit descriptions.
 - Owner-only questions (tenure, absentee or out-of-area owners): search_properties with roof_age_min 0 and open_permits false, so the roof clause does not narrow the match; without a place, search county-wide (no lat and lon).
 - Default radius is 5 miles. Use the tools' default page size.
 
@@ -54,9 +54,9 @@ Format of your final message, always, also when you ask a question or decline (s
 OUTCOME: <one of ${OUTCOMES.join(', ')}>
 ASSUMPTION: <zero to two lines; the server already adds the search center's basis, the identity rules and the durations' date>
 
-<the answer in Markdown, no HTML, no images, no links: at most three short sentences, then at most three records as a list, one short line each: the citation, an address or a short label, and one or two key figures>
+<the answer in Markdown, no HTML, no images, no links: at most three short sentences, the first giving the search's total matches when a search ran, then at most five records as a list, one short line each: the citation, an address or a short label, and one or two key figures>
 
-The user sees every returned record in an evidence table under your answer, so keep it short: never list more than three records, never repeat the full result, no bold or headings. Call tools without commentary: write text only in your final message.`;
+The user sees every returned record in an evidence table under your answer, so keep it short: never list more than five records, never repeat the full result, no bold or headings. Call tools without commentary: write text only in your final message.`;
 }
 
 /** Splits the model's final message into its declared outcome, assumptions and answer body. */

@@ -7,6 +7,9 @@ import type { SqlEngine, SqlResult } from '../lib/duckdb.js';
 
 export type EngineLoader = () => Promise<SqlEngine>;
 
+type Source = 'mirror' | 'filebase';
+const FILEBASE = 'https://ipfs.filebase.io/ipfs/';
+
 let shared: Promise<SqlEngine> | null = null;
 /** DuckDB-WASM, started once per page; App starts it in the background shortly after load, so this tab finds it ready. */
 export function preloadEngine(): Promise<SqlEngine> {
@@ -40,6 +43,7 @@ export function QueryLayer({ loadEngine = defaultLoader }: { loadEngine?: Engine
   const runId = meta.data?.run.run_id;
   const manifest = useManifest(runId);
   const [shard, setShard] = useState<string>('');
+  const [source, setSource] = useState<Source>('mirror');
   const [sql, setSql] = useState('select version() as duckdb_version');
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready'>('idle');
   const [engine, setEngine] = useState<SqlEngine | null>(null);
@@ -75,14 +79,17 @@ export function QueryLayer({ loadEngine = defaultLoader }: { loadEngine?: Engine
         setEngine(current);
       }
       if (!tablesCid) throw new Error(`no tables CID for ${activeShard} in /v1/meta.groups`);
-      if (registeredShard.current !== activeShard) {
+      const registration = `${source}:${activeShard}`;
+      if (registeredShard.current !== registration) {
         await current.registerTables(
           [...tables.entries()].map(([name, parts]) => ({
             name,
-            urls: parts.map((p) => mirrorPath(tablesCid, p.relativePath)),
+            urls: parts.map((p) =>
+              source === 'filebase' ? `${FILEBASE}${p.cid}` : mirrorPath(tablesCid, p.relativePath),
+            ),
           })),
         );
-        registeredShard.current = activeShard;
+        registeredShard.current = registration;
       }
       const used = [...tables.keys()].filter((name) => new RegExp(`\\b${name}\\b`, 'i').test(sql));
       setReadCids(
@@ -104,7 +111,8 @@ export function QueryLayer({ loadEngine = defaultLoader }: { loadEngine?: Engine
           <strong>no database server</strong>: the API embeds a read-only DuckDB file, and the box
           below runs DuckDB-WASM in this browser over the published Parquet parts, mirrored
           same-origin at <code>/tables/&lt;tables_cid&gt;/…</code> and read with HTTP range
-          requests. Oracle hosts no database and no query compute for it.
+          requests. Switch the source to read each part straight from an IPFS gateway by its CID
+          instead. Oracle hosts no database and no query compute for it.
         </p>
         {meta.data ? (
           <p className="muted">
@@ -132,6 +140,17 @@ export function QueryLayer({ loadEngine = defaultLoader }: { loadEngine?: Engine
                     {key}
                   </option>
                 ))}
+              </select>
+            </label>{' '}
+            <label>
+              Read from{' '}
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value as Source)}
+                aria-label="Read from"
+              >
+                <option value="mirror">Same-origin mirror (fast)</option>
+                <option value="filebase">IPFS by part CID (ipfs.filebase.io)</option>
               </select>
             </label>
             <p>Tables root CID: {tablesCid ? <Cid value={tablesCid} /> : 'n/a'}</p>

@@ -94,6 +94,21 @@ describe('Query layer (demo step 3)', () => {
     expect(within(read).getAllByText(/^bafkrei|^bafybei/).length).toBeGreaterThan(0);
     expect(await screen.findByText(/1 rows in 3 ms/)).toBeTruthy();
   });
+
+  it('reads the same parts from ipfs.filebase.io by part CID when switched', async () => {
+    const { engine, registered } = fakeEngine();
+    renderWithApi(<QueryLayer loadEngine={async () => engine} />);
+    const select = await screen.findByLabelText('Group and shard');
+    fireEvent.change(select, { target: { value: 'property_improvement/s0013' } });
+    fireEvent.change(screen.getByLabelText('Read from'), { target: { value: 'filebase' } });
+    fireEvent.click(screen.getByText('Run query'));
+    await screen.findByText(/1 rows in 3 ms/);
+    const urls = registered.flatMap((t) => t.urls);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(
+      urls.every((u) => /^https:\/\/ipfs\.filebase\.io\/ipfs\/(bafkrei|bafybei)/.test(u)),
+    ).toBe(true);
+  });
 });
 
 describe('Manifest (demo step 4)', () => {
@@ -188,6 +203,7 @@ describe('Lead queries (demo steps 7 and 8)', () => {
     expect(call).toContain('open_permits=false');
     expect(call).toContain('lat=30.2672');
     expect(call).toContain('radius_miles=5');
+    expect(call).toContain('roof_work_class=primary_roof_replacement%2Crepair_or_coating');
   });
 
   it('lists open and stalled roofing permits with contractor attribution and BBB status', async () => {
@@ -205,6 +221,21 @@ describe('Lead queries (demo steps 7 and 8)', () => {
         (c) => c.includes('/v1/permits/search') && c.includes('status_group=open%2Cstalled'),
       ),
     ).toBe(true);
+    expect(
+      mock.calls.some((c) =>
+        c.includes('roof_work_class=primary_roof_replacement%2Crepair_or_coating'),
+      ),
+    ).toBe(true);
+  });
+
+  it('drops the replacements-and-repairs filter when unticked', async () => {
+    const { mock } = renderWithApi(<Search />);
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'permits' } });
+    fireEvent.click(screen.getByLabelText(/Replacements and repairs only/));
+    fireEvent.click(screen.getByText('Search'));
+    await screen.findByTestId('permit-card');
+    const call = mock.calls.find((c) => c.includes('/v1/permits/search')) as string;
+    expect(call).not.toContain('roof_work_class');
   });
 
   it('resolves a place name through /v1/search-centers', async () => {

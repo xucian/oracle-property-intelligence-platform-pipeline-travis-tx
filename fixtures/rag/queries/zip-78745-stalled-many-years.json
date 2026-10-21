@@ -22,36 +22,16 @@
               "status_group": ["stalled"],
               "min_open_years": {
                 "$in": [5, 10]
-              }
+              },
+              "roof_work_class": ["primary_roof_replacement", "repair_or_coating"]
             }
           }
         ],
         "ids": {
           "kind": "permit",
           "tool": "search_permits",
-          "values": [
-            "2002-019367 BP",
-            "2009-045563 BP",
-            "2007-120863 BP",
-            "2007-173746 BP",
-            "2006-000188 BP",
-            "2013-064403 BP",
-            "2007-001596 BP",
-            "2014-122431 BP",
-            "2015-072413 BP",
-            "2001-005580 BP",
-            "2001-016997 BP",
-            "2001-000258 BP",
-            "2001-003238 BP",
-            "2001-004119 BP",
-            "2001-017834 BP",
-            "2013-121553 BP",
-            "2002-004108 BP",
-            "2002-011696 BP",
-            "2002-011714 BP",
-            "2014-082039 BP"
-          ],
-          "total": 23,
+          "values": ["2013-064403 BP"],
+          "total": 1,
           "computed_by": "query layer"
         }
       }

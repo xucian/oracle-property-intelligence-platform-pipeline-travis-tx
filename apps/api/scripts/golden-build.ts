@@ -123,10 +123,12 @@ async function indiePermits(
   c: { lat: number; lon: number },
   radius: number,
   minYears: number,
+  classes: readonly string[],
 ): Promise<Independent> {
   const base = `SELECT permit_id, status_group, ${miles(c.lat, c.lon, 'radius_lat', 'radius_lon')} AS d,
       CASE status_group WHEN 'open' THEN date_diff('day', open_since, DATE '${asOf}') WHEN 'stalled' THEN static_duration_days END AS od
-    FROM perms WHERE radius_lat IS NOT NULL AND is_roofing AND status_group IN ('open', 'stalled')`;
+    FROM perms WHERE radius_lat IS NOT NULL AND is_roofing AND status_group IN ('open', 'stalled')
+      AND roof_work_class IN (${classes.map((k) => `'${k}'`).join(', ')})`;
   const where = `d <= ${radius} AND od >= ${minYears * 365}`;
   const [t] = await sql(`SELECT count(*) AS n FROM (${base}) WHERE ${where}`);
   const rows = await sql(`SELECT permit_id FROM (${base}) WHERE ${where}
@@ -249,6 +251,9 @@ const README_1 =
 const README_2 =
   'Which properties near that area have open roofing permits that have been open for many years, and who is the listed contractor?';
 const r5 = { radius_miles: 5 };
+/** The prompt's roofing-lead default (replacements and repairs). */
+const LEADS = ['primary_roof_replacement', 'repair_or_coating'];
+const leads = { roof_work_class: LEADS };
 
 const cases: Case[] = [
   {
@@ -264,10 +269,10 @@ const cases: Case[] = [
       ),
       await permitsTurn(
         README_2,
-        { ...at(AUSTIN), ...r5, min_open_years: 5 },
+        { ...at(AUSTIN), ...r5, min_open_years: 5, ...leads },
         [resolve('Austin')],
-        { ...at(AUSTIN), ...r5, min_open_years: { $in: [5, 10] } },
-        await indiePermits(AUSTIN_INDIE, 5, 5),
+        { ...at(AUSTIN), ...r5, min_open_years: { $in: [5, 10] }, ...leads },
+        await indiePermits(AUSTIN_INDIE, 5, 5, LEADS),
       ),
     ],
   },
@@ -315,9 +320,9 @@ const cases: Case[] = [
     turns: [
       await permitsTurn(
         'List open roofing permits within 2 miles of Lakeway.',
-        { ...at(LAKEWAY), radius_miles: 2 },
+        { ...at(LAKEWAY), radius_miles: 2, ...leads },
         [resolve('Lakeway')],
-        { ...at(LAKEWAY), radius_miles: 2 },
+        { ...at(LAKEWAY), radius_miles: 2, ...leads },
       ),
     ],
   },
@@ -338,13 +343,14 @@ const cases: Case[] = [
     turns: [
       await permitsTurn(
         'Which stalled roofing permits within 3 miles of 78745 have been open for many years?',
-        { ...at(Z78745), radius_miles: 3, status_group: ['stalled'], min_open_years: 5 },
+        { ...at(Z78745), radius_miles: 3, status_group: ['stalled'], min_open_years: 5, ...leads },
         [resolve('78745')],
         {
           ...at(Z78745),
           radius_miles: 3,
           status_group: ['stalled'],
           min_open_years: { $in: [5, 10] },
+          ...leads,
         },
       ),
     ],

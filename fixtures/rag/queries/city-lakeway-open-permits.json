@@ -18,7 +18,8 @@
             "args": {
               "lat": 30.361708811952585,
               "lon": -97.98169817685724,
-              "radius_miles": 2
+              "radius_miles": 2,
+              "roof_work_class": ["primary_roof_replacement", "repair_or_coating"]
             }
           }
         ],
