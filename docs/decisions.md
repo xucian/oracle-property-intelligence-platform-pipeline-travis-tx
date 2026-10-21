@@ -2295,3 +2295,59 @@ clicked it got `404 {"error":"not_found"}`.
   no cold start was measured); `/v1/openapi.json` stayed byte-identical (150,244 bytes, SHA-256 `7d8ece68…`, the same
   before and after the deploy and equal to `packages/contract/openapi.json`); `/v1/nothing` and `POST /` answered 404;
   `/v1/meta` 200.
+
+## 36. 2026-10-21: the CRM's requests, the agent's citation repair, and the review follow-ups
+
+The CRM's slowking run scored its PR at 85; the top deduction was long-open lead relevance, caused by this pipeline's
+data and property search. Its session asked for R1–R5 (R1–R4 deployed by 19:30 EEST, R5 by 20:30 or skipped).
+
+- **R1, a completed date closes a permit.** Austin's export still prints "Active" on some old permits that have a
+  completed date (`1999-002931 BP`, a storage shed, completed 1999-07-04, was shown as open 27 years). The deploy build
+  now serves a permit whose printed status maps to open or stalled but which has a completed date as `closed`, with the
+  new optional `status_group_basis: completed_date`; the printed status stays in `status`. The profile's own mapping is
+  kept as `status_group_profile`, and the reconciliation compares that with the kit's permits-internal, so the run
+  record, the published archives and the kit are unchanged (they hold the printed status). It carries into the open and
+  stalled counts, the durations, the long-open signal, the sort, permit search's default and `/v1/meta`, in REST and MCP.
+  673 published permits move (768 in the county, 87 of them roofing): open roofing permits 4,379 → 4,292; stalled stays
+  6,378 (no stalled roofing permit has a completed date). The CRM's evidence query (5 miles of downtown, open at least 5
+  years) returns 136 permits, none with a completed date (165 before, 29 of the first 100 completed). A new
+  reconciliation check: no served open or stalled permit has a completed date. A `/v1/meta` limitation gives the count.
+- **R2, `roof_work_class` on property search** (REST, and the MCP and agent tool `search_properties`): an optional list
+  of the four roofing classes. It limits `roofing_permit_counts.open` and `.stalled`, the open, long-open and stalled
+  match reasons, the sort and `total`; omitted, all four count as before. Each property carries the four signal columns
+  per roofing class (16 columns), the query combines the requested ones, and a reconciliation check proves they add up
+  to the totals. Live: near downtown at 5 miles with `primary_roof_replacement,repair_or_coating`, 10 rows are long-open
+  (24 without it), and each has an open or stalled replacement or repair permit at least 5 years old with no completed date.
+- **R3.** `dailyApiRequestLimit` 20,000 → 50,000; the alarm threshold reads 50,000 live. The worst day rises to about $6
+  (section 34: about $5), the extra 30,000 full requests before the alarm trips.
+- **R4.** A contractor `phone` with fewer than 10 digits is `null`, in permit and contractor responses; the attribution
+  key and the captured value are unchanged.
+- **R5, declined.** Titan Text Embeddings V2 on demand embeds one text per call, so about 2 million permit descriptions
+  take hours; cosine scoring over vectors read from S3 Parquet on a cold Lambda does not fit the 25 s budget; and there
+  was no time for an alakazam review before 20:30. Text search stays lexical (BM25), the recorded deviation.
+- **The agent's daily question limit stays 200** (the CRM raises its own Assistant to 500): the 5M-token cap already
+  bounds the cost, and review traffic is far below 200.
+- **One contract change** (R2's parameter, R1's field; dated in `api-contract.md`), served from `031b720`, deploy
+  `0b604818b489aff5` (run 2, rebuilt), deployed 12:08Z; the served `openapi.json` equals the committed file (SHA-256
+  `6ff17f6c…`). The test fixture is rebuilt from run 2 (16.2 MB; its cap is now 18 MB for the 16 new columns), and three
+  query tests now name run 2.
+- **The agent's citation repair.** Section 33's one miss (`alias-westlake`) was the model, not the checker: its
+  LangSmith trace shows `[[property:110514]]` on the row the tool returned as `110510` (same address and roof age). When
+  the check refuses an answer and at least 5 s remain, the model now gets one more step with the refused ids and
+  rewrites the answer, which is checked again; anything still failing returns no model text, as before. The step keeps
+  the tools and is told not to call them: Bedrock drops the tool configuration for `toolChoice: 'none'` and refuses a
+  conversation with tool blocks without one. The prompt (version `.7`) says to copy ids character for character, and
+  "property 1967" (a year) is no longer read as a property id (no property id lies in 1800–2099; the smallest is
+  100008). Deployed 12:16Z (`91eeb01`). Live golden replay on run 2 after R1 (`20261021T121640Z`, 23 cases, 25 turns):
+  hard gates 25/25 and 25/25, outcome accuracy 1.00, parameter accuracy 0.94 (`contractor-identity` called
+  `search_businesses` rather than `get_contractor`; `out-of-county-dallas` answered without a tool; both outcomes right),
+  p95 11.3 s, README turns 9.9 s and 11.3 s. README turn 2's expected set is 110 properties (139 before R1).
+- **Review follow-ups.** `GET /v1/mcp` from a browser still answers `405`, since the MCP spec allows only an SSE stream
+  or `405` there; its `detail` now says so. TCAD's supplemental roll export 335 (2026-10-08), which section 33 said was
+  "recorded as a limitation", was in neither the run record nor the PR: it is now a `/v1/meta` limitation and in the PR
+  (owner, deed and value fields are as of the certified roll of 2026-07-18); section 6's "plus any new supplemental roll"
+  was not met by run 2. Atlas: [elephant-xyz/atlas#78](https://github.com/elephant-xyz/atlas/issues/78) asks whether a
+  county entry may list several archives per data group (the question in `OPTIONAL-WORK.md`, now sent). CI: the PR comes
+  from a fork and the upstream runs no workflow for it, so `pr.yml` also runs on pushes to the fork's `assignment`
+  branch; green on `91eeb01` ([run 39598326275](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/actions/runs/39598326275)).
+  Prettier: three files from `b5770c4` reformatted (whitespace only; one is a saved golden result).

@@ -190,7 +190,10 @@ the user which one was meant.
 
 Params: `lat`, `lon` (optional, given together), `radius_miles`, `roof_age_min`, `open_permits` (bool; REST
 default `true`; **required, with no default, in the MCP and agent tool**, because the default widens an age question
-to properties with open permits), `long_open_years`, `owner_tenure_min` (years), `absentee_owner` (bool), `out_of_area_owner` (bool),
+to properties with open permits), `long_open_years`, `roof_work_class` (comma list of roofing classes, optional; added
+2026-10-21: it limits `roofing_permit_counts.open` and `.stalled`, the open, long-open and stalled match reasons, the
+sort and `total` to those classes, e.g. `primary_roof_replacement,repair_or_coating`; omitted, all four roofing classes
+count), `owner_tenure_min` (years), `absentee_owner` (bool), `out_of_area_owner` (bool),
 `limit`, `cursor`. Without `lat`/`lon` the search is county-wide: the radius clause is skipped and
 `distance_miles` is `null`, which is how "properties that have not changed owner in 10+ years" is asked
 without a center.
@@ -404,12 +407,13 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
 | `roof_work_class`, `work_classifier_version` | see definitions | |
 | `is_roofing`, `is_reroof` | bool | derived from `roof_work_class` |
 | `status` | string | `status_current` as printed |
-| `status_group` | `open`, `stalled`, `closed`, `needs_review` | |
+| `status_group` | `open`, `stalled`, `closed`, `needs_review` | a printed open or stalled status with a `completed_date` is `closed` (2026-10-21) |
+| `status_group_basis` | `status`, `completed_date` (optional, added 2026-10-21) | `completed_date`: closed by the completed date, the printed status kept in `status` |
 | `status_observed_at`, `status_source` | | see definitions |
 | `applied_date`, `issued_date`, `expires_date`, `completed_date` | date or null | as printed; a null `completed_date` is not a confirmed empty |
 | `completed_date_evidence` | see definitions | |
 | `open_since`, `open_since_basis`, `open_duration_days`, `open_duration_basis`, `open_duration_as_of`, `days_since_expiry` | | see definitions |
-| `contractor` | `{contractor_attribution_key, identity_status: "source_name_attribution", printed_name, company_name, trade, phone}` | `printed_name` = `contractor_full_name` as printed, never blanked |
+| `contractor` | `{contractor_attribution_key, identity_status: "source_name_attribution", printed_name, company_name, trade, phone}` | `printed_name` = `contractor_full_name` as printed, never blanked; `phone` is `null` when it prints fewer than 10 digits (2026-10-21) |
 | `bbb` | `{rating, status, incomplete_reason, note}` | |
 | `lat`, `lon` | number or null | permit coordinates |
 | `source` | `{dataset: "austin-issued-construction-permits/3syk-w9eu", record_id, url, fetched_at, run_id, request_identifier, source_http_request}` | `url` = the permit's public page; `source_http_request` is the request that produced the published record, taken from the run record, since the exported tables omit it |
@@ -635,5 +639,10 @@ property's permits are paged through `GET /v1/permits/search?property_id=`.
   `detail`. A permit that prints no contractor company, name or phone has `contractor: null` (805,332 of the published
   permits in run 1), never a shared blank attribution key; a `/v1/meta` limitation (`no_contractor_printed`) gives the count. No
   other field changes.
+- 2026-10-21, the CRM's requests (decisions.md section 36; additive under the rule above): `GET /v1/properties/search`
+  and the MCP and agent tool `search_properties` gain the optional `roof_work_class` (the four roofing classes); permits
+  gain the optional `status_group_basis`, and a printed open or stalled status with a `completed_date` is served as
+  `closed`, which changes counts, durations and the open-permit signal but no field; a contractor `phone` with fewer
+  than 10 digits is `null`; the `detail` of `GET /v1/mcp`'s `405` names the MCP spec. No other field changes.
 - The CRM pins `v1`. If the CRM needs something new, change this file in this repository first, then the server, then the CRM.
 - `GET /v1/openapi.json` must match this document; a mismatch is a bug in the server.
