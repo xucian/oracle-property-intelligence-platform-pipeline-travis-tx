@@ -38,6 +38,13 @@ jobs:
         run: just type-check
       - name: Build (Lambda bundles, explorer)
         run: just build
+      # the query layer only LOADs fts (autoinstall is off, as in the Lambda image); test workspaces run in parallel
+      - name: DuckDB extensions for the fixture tests
+        working-directory: packages/query
+        run: >-
+          node --input-type=module -e "import { DuckDBInstance } from '@duckdb/node-api';
+          const c = await (await DuckDBInstance.create(':memory:')).connect();
+          await c.run('INSTALL fts'); await c.run('INSTALL httpfs');"
       - name: Vitest (contract, query, CDK assertions)
         run: just test
       - name: Stage the fixture DuckDB file
