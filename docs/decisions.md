@@ -2373,3 +2373,13 @@ requests a minute. Both reviews were then run, read-only:
   `apps/api/scripts/embed-descriptions.ts`) stay in `data/deploy/embeddings`, not served and not published, for that
   later deploy. They are a deploy-time index of the served run, like the BM25 index, not a published artifact: runs 1
   and 2 keep their CIDs, and a later run embeds only the descriptions not already cached.
+
+## 38. 2026-10-21: PagerDuty wired to the alarm topic
+
+The CRM created a free PagerDuty service and put its Amazon CloudWatch integration URL in the SSM String parameter
+`/roofing-crm/pagerduty/integration-url` (same account and region). The alarm topic now subscribes it over HTTPS beside
+the email subscriber, as section 21 planned, which closes section 29's email-only substitution. The CDK config names the
+parameter (`pagerDutyUrlParam`); the URL is resolved from SSM at deploy and is never in git. Deployed 12:58Z (`c0f658e`,
+infrastructure only: the image did not change). PagerDuty confirmed the subscription, and a test on the API errors alarm
+(ALARM 13:00:26Z, OK 13:01:12Z; not a budget alarm, so no kill switch) delivered 7 notifications with 0 failed. A CDK
+test asserts the HTTPS subscription and its SSM parameter.
