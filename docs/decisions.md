@@ -2264,3 +2264,6 @@ Before submission the operator ruled that the search API needs a daily stop, not
 - **Cost of the worst day** falls to about $5: the requests before the alarm trips, then about 1.7 million fast 503s,
   mostly API Gateway's $1 per million.
 
+- **The `project_name` cost-allocation tag** (section 21 says it is activated) was found inactive in billing on
+  2026-10-21 and activated then; Cost Explorer can filter by it from that date only, so the PR's cost figures come from
+  the account's bill with credits excluded, not from the tag.
