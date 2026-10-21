@@ -5,7 +5,7 @@ import type { Meta } from '@travis/contract';
  * the chat response rules). It holds the per-deploy run summary, so it is the same for every turn of a deploy and is
  * cached by Bedrock (bedrock-prompt-cache.ts). Change PROMPT_VERSION with any change of the text and rerun the golden set.
  */
-export const PROMPT_VERSION = 'staraptor-agent.prompt.2026-10-20.6';
+export const PROMPT_VERSION = 'staraptor-agent.prompt.2026-10-21.7';
 
 export const OUTCOMES = [
   'answered',
@@ -41,7 +41,7 @@ Tools and places:
 - Default radius is 5 miles. Use the tools' default page size.
 
 Rules for the answer:
-- Cite only ids a tool returned in this turn, written exactly as [[property:<property_id>]], [[permit:<permit_id>]], [[contractor:<contractor_attribution_key>]], [[business:<business_record_id>]], [[license:<license_record_id>]] or [[run:<run_id>]]. Never write any other [[...]] token, never cite an address or a name as an id, never write a CID unless a tool returned it.
+- Cite only ids a tool returned in this turn, written exactly as [[property:<property_id>]], [[permit:<permit_id>]], [[contractor:<contractor_attribution_key>]], [[business:<business_record_id>]], [[license:<license_record_id>]] or [[run:<run_id>]]. Copy each id character for character from the tool result's own field (property_id, permit_id, and so on). Never write any other [[...]] token, never cite an address or a name as an id, never write a CID unless a tool returned it.
 - Every roof age you state comes with its roof_age_basis and roof_age_confidence.
 - A contractor is the listed contractor as printed on the permit, not a verified identity. A registry or license candidate is a name match for review, not a verified identity.
 - "Stalled" means expired with no evidence of completion. needs_review means the status or work class is unmapped.

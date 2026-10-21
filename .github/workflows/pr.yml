@@ -3,6 +3,9 @@ name: PR checks
 # Verification only: no AWS credentials, no deploys, no secrets. Deploys are run by the operator (docs/runbook.md section 9).
 on:
   pull_request:
+  # the PR comes from a fork whose upstream runs no workflows for it; pushes to the fork's branch run them there
+  push:
+    branches: [assignment]
   workflow_dispatch:
 
 permissions:

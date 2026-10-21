@@ -687,16 +687,39 @@ describe('runTurn', () => {
     expect(r.body.limitations.map((l) => l.incomplete_reason)).toEqual(['partial_history']);
     expect(r.stats).toMatchObject({ steps: 3, tool_calls: 2, cited: 2, citation_failures: 0 });
   });
-  it('fails closed when the answer cites an id no tool returned in this turn', async () => {
+  it('fails closed when the answer cites an id no tool returned, even after the one repair', async () => {
     const r = await runTurn(
       deps([
         toolCall('t1', 'resolve_search_center', { q: 'Austin' }),
         text('OUTCOME: answered\n\nSee [[property:103857]].'),
+        text('OUTCOME: answered\n\nSee [[property:103858]].'),
       ]),
       input(),
     );
     expect(r.kind === 'response' && r.body).toMatchObject({ outcome: 'tool_error', answer: '' });
-    expect(r.stats.citation_failures).toBe(1);
+    expect(r.stats).toMatchObject({ citation_failures: 1, citation_repairs: 1 });
+  });
+  it('one repair round fixes an id the model mistyped (the live alias-westlake miss)', async () => {
+    const r = await runTurn(
+      deps([
+        toolCall('t1', 'resolve_search_center', { q: 'Austin' }),
+        toolCall('t2', 'search_properties', searchArgs),
+        text('OUTCOME: answered\n\nOne match: [[property:104]] — 701 Newman Dr.'),
+        text('OUTCOME: answered\n\nOne match: [[property:100]] — 701 Newman Dr.'),
+      ]),
+      input(),
+    );
+    expect(r.kind === 'response' && r.body).toMatchObject({
+      outcome: 'answered',
+      answer: 'One match: [[property:100]] — 701 Newman Dr.',
+    });
+    expect(r.stats).toMatchObject({ cited: 1, citation_failures: 1, citation_repairs: 1 });
+  });
+  it('a year after "property" is not read as a property id', () => {
+    expect(checkCitations('This property 1967 roof is old.', new EvidenceCollector('r')).ok).toBe(
+      true,
+    );
+    expect(checkCitations('See property 103857.', new EvidenceCollector('r')).ok).toBe(false);
   });
   it('never answers "answered" without a successful tool call', async () => {
     const r = await runTurn(

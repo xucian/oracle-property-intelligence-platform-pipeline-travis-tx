@@ -20,8 +20,9 @@ const CID = /\bba[a-z2-7]{40,}\b/g;
 const BARE_PERMIT = /\b(\d{4}-\d{6})[ -]?([A-Z]{2})\b/g;
 /** Exactly 32 hex characters: a contractor attribution key, or a business or license record id. */
 const HEX32 = /\b[0-9a-f]{32}\b/g;
-/** "property 103857", "property ID 103857", "property #103857". */
-const PROPERTY_MENTION = /\bproperty(?:\s+id)?\s*(?:#|no\.|number)?\s*:?\s*(\d{3,9})\b/gi;
+/** "property 103857", "property ID 103857", "property #103857"; not a year ("property 1967 roof"): no id is one. */
+const PROPERTY_MENTION =
+  /\bproperty(?:\s+id)?\s*(?:#|no\.|number)?\s*:?\s*(?!(?:1[89]|20)\d{2}\b)(\d{3,9})\b/gi;
 /** An id in an API path, as in a link to `/v1/permits/2026-102216%20EP`. */
 const API_PATH =
   /\/v1\/(properties|permits|contractors|businesses|licenses|runs)\/([^\s)"'\]>#?]+)/g;

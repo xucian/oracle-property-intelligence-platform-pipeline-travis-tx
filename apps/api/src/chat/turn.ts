@@ -59,6 +59,8 @@ export interface TurnStats {
   turn_ms: number;
   deadline_hit: boolean;
   citation_failures: number;
+  /** 1 when the check refused the first answer and the model was asked once to rewrite it. */
+  citation_repairs: number;
   bedrock_throttles: number;
   bedrock_denials: number;
   retries: number;
@@ -123,6 +125,10 @@ export interface TurnInput {
 
 const LIMIT_TEXT =
   'This turn reached its time or output limit before the answer was complete. The evidence gathered so far is listed below; ask again, or narrow the question.';
+/** A citation repair step needs about one short answer step of time. */
+const REPAIR_MIN_MS = 5000;
+const repairRequest = (tokens: string[]) =>
+  `Your answer cited ids that no tool returned in this turn: ${tokens.join(', ')}. Do not call any tool. Write the same answer again, citing only ids that appear in this turn's tool results, copied character for character; leave out any record you cannot cite. Keep the OUTCOME and ASSUMPTION lines.`;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16);
 
 export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnResult> {
@@ -154,11 +160,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   const maxSteps = deps.maxSteps ?? 6;
   const sessionKey = input.sessionId ?? input.requestId;
   const AgentClass: typeof ToolLoopAgent = deps.langsmith.ToolLoopAgent;
-  const agent = new AgentClass({
+  const agentSettings = (steps: number) => ({
     model: budget.wrap(deps.model),
     instructions: systemPrompt(meta),
     tools,
-    stopWhen: isStepCount(maxSteps),
+    stopWhen: isStepCount(steps),
     maxRetries: 0,
     providerOptions: {
       langsmith: deps.langsmith.providerOptions({
@@ -174,6 +180,25 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
       }),
     },
   });
+  const agent = new AgentClass(agentSettings(maxSteps));
+  const repairCitations = async (
+    settings: ReturnType<typeof agentSettings>,
+    msgs: ModelMessage[],
+  ): Promise<{ text: string; finishReason: string } | null> => {
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), Math.max(0, deadline - reserve - now()));
+    try {
+      const r = await new AgentClass(settings).generate({
+        messages: msgs,
+        abortSignal: ctl.signal,
+      });
+      return r.text ? { text: r.text, finishReason: r.finishReason ?? 'other' } : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(tm);
+    }
+  };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - reserve - now()));
@@ -186,11 +211,13 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   let stoppedBy: 'deadline' | 'output_budget' | 'steps' | null = null;
   let stepText: number[] = [];
   let failure: unknown = null;
+  let responseMessages: ModelMessage[] = [];
   try {
     const r = await agent.generate({ messages, abortSignal: controller.signal });
     text = r.text ?? '';
     finishReason = r.finishReason ?? 'other';
     stepText = r.steps.map((x) => x.text?.length ?? 0);
+    responseMessages = r.response.messages as ModelMessage[];
     const last = r.steps[r.steps.length - 1];
     if ((last?.toolCalls?.length ?? 0) > 0 && r.steps.length >= maxSteps) stoppedBy = 'steps';
   } catch (e) {
@@ -222,6 +249,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
     turn_ms: now() - input.receivedAt,
     deadline_hit: stoppedBy === 'deadline',
     citation_failures: 0,
+    citation_repairs: 0,
     bedrock_throttles: budget.throttles,
     bedrock_denials: budget.denials,
     retries: budget.retries,
@@ -275,21 +303,56 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   // Every tool_error carries no model text at all: no answer, no model assumptions (review B1).
   if (failure) return respond('tool_error', '', []);
 
-  const parsed = parseFinalMessage(text);
   // No HTML, no images, links only to the API, the explorer and the gateways: enforced here, not only in the explorer.
   const links = deps.links ?? {};
-  let answer = sanitizeAnswer(parsed.answer, links);
-  const modelAssumptions = parsed.assumptions.map((a) => sanitizeAnswer(a, links)).filter((a) => a);
-  if (finishReason === 'length' && answer) answer = `${answer} …`;
+  const read = (t: string, reason: string) => {
+    const p = parseFinalMessage(t);
+    const a = sanitizeAnswer(p.answer, links);
+    return {
+      parsed: p,
+      answer: a && reason === 'length' ? `${a} …` : a,
+      modelAssumptions: p.assumptions.map((x) => sanitizeAnswer(x, links)).filter((x) => x),
+    };
+  };
+  let { parsed, answer, modelAssumptions } = read(text, finishReason);
   if (!answer) {
     deps.onWithheld?.({ text, reason: 'empty_answer', failures: [] });
     return respond('tool_error', '', []);
   }
   // The model's assumption lines are checked with the answer: they are model text too (review B1).
-  const check = checkCitations([...modelAssumptions, answer].join('\n'), evidence);
+  let check = checkCitations([...modelAssumptions, answer].join('\n'), evidence);
+  let citationRepairs = 0;
+  let failures = 0;
   if (!check.ok) {
     deps.onWithheld?.({ text, reason: 'citation_check', failures: check.failures });
-    return respond('tool_error', '', [], { citation_failures: check.failures.length });
+    failures = check.failures.length;
+    // One repair round when time is left: the model is told which ids the check refused and rewrites the answer, which
+    // is checked again; anything still failing returns no model text, as before.
+    const repaired =
+      budget.remainingMs() > REPAIR_MIN_MS
+        ? await repairCitations(agentSettings(1), [
+            ...messages,
+            ...responseMessages,
+            { role: 'user', content: repairRequest(check.failures.map((f) => f.token)) },
+          ])
+        : null;
+    if (repaired) {
+      citationRepairs = 1;
+      ({ parsed, answer, modelAssumptions } = read(repaired.text, repaired.finishReason));
+      check = checkCitations([...modelAssumptions, answer].join('\n'), evidence);
+    }
+    if (!repaired || !answer || !check.ok) {
+      if (repaired)
+        deps.onWithheld?.({
+          text: repaired.text,
+          reason: 'citation_check',
+          failures: check.failures,
+        });
+      return respond('tool_error', '', [], {
+        citation_failures: failures,
+        citation_repairs: citationRepairs,
+      });
+    }
   }
   // Without an OUTCOME line: a reply that cites nothing and asks something is a clarification question.
   const asks = check.cited.length === 0 && /\?/.test(answer);
@@ -303,7 +366,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput): Promise<TurnRes
   }
   if (outcome === 'answered' && check.cited.length === 0 && evidence.items.length === 0)
     outcome = 'no_matches';
-  return respond(outcome, answer, modelAssumptions, { cited: check.cited.length });
+  return respond(outcome, answer, modelAssumptions, {
+    cited: check.cited.length,
+    citation_failures: failures,
+    citation_repairs: citationRepairs,
+  });
 }
 
 function hasCause(e: unknown, cls: new (...a: never[]) => Error): boolean {
