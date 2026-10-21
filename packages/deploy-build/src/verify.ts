@@ -4,11 +4,13 @@ import path from 'node:path';
 import {
   KIT_DATA,
   MANIFEST_PATH,
+  captureDir,
   PUBLICATION_PATH,
   RUN_DIR,
   RUN_ID,
   RUN_RECORD_PATH,
   shardIds,
+  linkDir,
 } from './env.js';
 import { HashCache, mapLimit, sha256Hex } from './hash.js';
 
@@ -222,7 +224,7 @@ export async function verifyInputs(
         check: 'hashed',
       });
     }
-    const rel = `link-a1/${shard}.jsonl`;
+    const rel = `${path.basename(linkDir())}/${shard}.jsonl`;
     const p = path.join(RUN_DIR, 'global', rel);
     add({
       id: `run:global/${rel}`,
@@ -232,9 +234,9 @@ export async function verifyInputs(
       check: 'link.done.json',
     });
   }
-  const pi = path.join(RUN_DIR, 'global', 'link-a1', 'permits-internal.jsonl');
+  const pi = path.join(linkDir(), 'permits-internal.jsonl');
   add({
-    id: 'run:global/link-a1/permits-internal.jsonl',
+    id: `run:global/${path.basename(linkDir())}/permits-internal.jsonl`,
     path: pi,
     sha256: await cache.sha256(pi),
     expected: null,
@@ -242,7 +244,7 @@ export async function verifyInputs(
   });
 
   // ---- Socrata permit capture vs its receipts and the run record ---------------------------------------------------
-  const capDir = path.join(KIT_DATA, 'permits', 'v1792239863');
+  const capDir = captureDir();
   const capture = readJson(path.join(capDir, 'capture.json'));
   const receipts = readFileSync(path.join(capDir, 'receipts.jsonl'), 'utf8')
     .split('\n')

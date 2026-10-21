@@ -8,9 +8,10 @@ import {
   MANIFEST_PATH,
   PUBLICATION_PATH,
   REPO_ROOT,
-  RUN_DIR,
+  captureDir,
   RUN_ID,
   RUN_RECORD_PATH,
+  linkDir,
 } from './env.js';
 import { sha256Hex } from './hash.js';
 import type { Kit } from './kit.js';
@@ -58,11 +59,12 @@ export async function loadMeta(
     if (
       !f.endsWith('.json') ||
       f.endsWith('.publication.json') ||
-      f.endsWith('.gateway-checks.json')
+      f.includes('.gateway-checks')
     )
       continue;
     const text = readFileSync(path.join(runsDir, f), 'utf8');
     const rec = JSON.parse(text);
+    if (typeof rec.run_id !== 'string') continue;
     const mf = path.join(REPO_ROOT, 'publish', rec.run_id, 'manifest.json');
     if (!existsSync(mf)) continue;
     const bytes = readFileSync(mf);
@@ -75,7 +77,12 @@ export async function loadMeta(
       started_at: rec.started_at,
       finished_at: rec.finished_at,
       manifest_cid: manifestCid,
-      record_json: text,
+      // A run record written before publication has no group roots; its own manifest lists them (every run in
+      // /v1/runs shows its roots, not only the served one).
+      record_json:
+        rec.groups && Object.keys(rec.groups).length > 0
+          ? text
+          : JSON.stringify({ ...rec, groups: groupsOfManifest(JSON.parse(bytes.toString('utf8'))) }),
     });
     manifestRows.push({
       run_id: rec.run_id,
@@ -139,7 +146,7 @@ export async function loadMeta(
   await db.insertJson('mirror_objects', mirror, tmp('mirror.ndjson'));
 
   // ---- capture receipts (partition requests) ------------------------------------------------------------------------
-  const capDir = path.join(KIT_DATA, 'permits', 'v1792239863');
+  const capDir = captureDir();
   const latest = new Map<string, any>();
   for (const l of readFileSync(path.join(capDir, 'receipts.jsonl'), 'utf8')
     .split('\n')
@@ -162,7 +169,7 @@ export async function loadMeta(
   );
 
   // ---- permits-internal: the kit's classification of every captured permit (reconciliation + captured-level counts) -----
-  await db.run(`CREATE TEMP TABLE permits_internal AS SELECT * FROM read_json(${q(path.join(RUN_DIR, 'global', 'link-a1', 'permits-internal.jsonl'))},
+  await db.run(`CREATE TEMP TABLE permits_internal AS SELECT * FROM read_json(${q(path.join(linkDir(), 'permits-internal.jsonl'))},
     format='newline_delimited', columns={permit_number:'VARCHAR', status_current:'VARCHAR', permit_class:'VARCHAR', work_class:'VARCHAR',
       status_group:'VARCHAR', lifecycle_status:'VARCHAR', roof_work_class:'VARCHAR', is_roofing:'BOOLEAN', is_reroof:'BOOLEAN',
       completed_date_evidence:'VARCHAR', property_id:'VARCHAR', unlinked_reason:'VARCHAR', match_method:'VARCHAR'})`);
@@ -356,7 +363,7 @@ export async function loadMeta(
       await db2.insertJson('limitations', lims, tmp('limitations.ndjson'));
 
       // ---- deploy_reads ----------------------------------------------------------------------------------------------
-      const cap = readJson(path.join(KIT_DATA, 'permits', 'v1792239863', 'capture.json'));
+      const cap = readJson(path.join(captureDir(), 'capture.json'));
       const srcOf = (ds: string) => (run.sources as any[]).find((s) => s.dataset === ds);
       const reads: object[] = [
         {
@@ -440,7 +447,7 @@ export async function insertDeployRow(
       q('48453'),
       q('travis-attribution-key.v1'),
       q(ver.work_classifier ?? 'travis-work-classifier-v2'),
-      `DATE '2026-10-17'`,
+      `DATE '${run.roof_age.as_of_date}'`,
       textIndexRows,
       q(FTS_CONFIG.stemmer),
       q(FTS_CONFIG.stopwords),
@@ -454,5 +461,26 @@ export async function insertDeployRow(
       q(JSON.stringify(mv)),
       q(JSON.stringify(bounds)),
     ].join(', ')})`,
+  );
+}
+
+/** Per `group/shard`: the archive root, its schema and its tables root, from a run's published manifest. */
+export function groupsOfManifest(
+  manifest: any,
+): Record<string, { cid: string; schema: string; tables: string | null }> {
+  const cars: any[] = manifest.cars ?? [];
+  return Object.fromEntries(
+    cars
+      .filter((car) => car.kind === 'archive')
+      .map((car) => [
+        `${car.group}/${car.shard}`,
+        {
+          cid: car.root_cid,
+          schema: car.schema_cid,
+          tables:
+            cars.find((t) => t.kind === 'tables' && t.group === car.group && t.shard === car.shard)
+              ?.root_cid ?? null,
+        },
+      ]),
   );
 }

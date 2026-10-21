@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { RUN_DIR } from './env.js';
+import { RUN_DIR, RUN_RECORD_PATH, linkDir } from './env.js';
 import { type Kit } from './kit.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const ROOF_AGE_AS_OF = '2026-10-17';
+/** The served run's as-of date (its record's `roof_age.as_of_date`): permit durations and roof ages are as of it. */
+export const ROOF_AGE_AS_OF: string = JSON.parse(readFileSync(RUN_RECORD_PATH, 'utf8')).roof_age.as_of_date;
 
 /** NDJSON writer with backpressure. */
 export class NdjsonWriter {
@@ -161,7 +163,7 @@ export async function stagePermitsAndRoofAge(o: PermitStageOptions): Promise<Per
     const live = new Set(parcels.map((p) => p.id));
     const byProp = new Map<string, { row: any; link: any }[]>();
     const rl = createInterface({
-      input: createReadStream(path.join(RUN_DIR, 'global', 'link-a1', `${shard}.jsonl`), {
+      input: createReadStream(path.join(linkDir(), `${shard}.jsonl`), {
         highWaterMark: 4 << 20,
       }),
       crlfDelay: Infinity,

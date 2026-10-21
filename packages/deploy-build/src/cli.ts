@@ -15,7 +15,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { S3Client } from '@aws-sdk/client-s3';
 import { buildDatabase } from './build.js';
-import { DEPLOY_ROOT, REPO_ROOT, SCHEMA_DIR, shardIds } from './env.js';
+import { DEPLOY_ROOT, PUBLICATION_PATH, REPO_ROOT, RUN_ID, SCHEMA_DIR, shardIds } from './env.js';
 import { buildFixture } from './fixture.js';
 import { HashCache, sha256FileRaw, sha256Hex } from './hash.js';
 import { mirror, stageInputs } from './mirror.js';
@@ -127,12 +127,7 @@ async function commandBuild(args: string[]): Promise<void> {
       log,
     });
     const duckdbSha256 = await sha256FileRaw(dbFile);
-    const manifestCid = JSON.parse(
-      readFileSync(
-        path.join(REPO_ROOT, 'runs', '20261018T143520Z-t5-full.publication.json'),
-        'utf8',
-      ),
-    ).manifest.cid;
+    const manifestCid = JSON.parse(readFileSync(PUBLICATION_PATH, 'utf8')).manifest.cid;
     const deployJson = {
       deploy_id: deployId,
       inputs_sha256: inputsSha256,
@@ -140,7 +135,7 @@ async function commandBuild(args: string[]): Promise<void> {
       server_commit: serverCommit(),
       duckdb_version: '1.5.6',
       duckdb_sha256: duckdbSha256,
-      run_id: '20261018T143520Z-t5-full',
+      run_id: RUN_ID,
       manifest_cid: manifestCid,
       bytes: statSync(dbFile).size,
       build: {
@@ -288,6 +283,6 @@ const main = cmd.startsWith('--')
             ? commandUploadServing(rest)
             : Promise.reject(new Error(`unknown command ${cmd}`));
 main.catch((e) => {
-  console.error(e instanceof Error ? e.message : e);
+  console.error(e instanceof Error ? (process.env.DEBUG ? e.stack : e.message) : e);
   process.exit(1);
 });

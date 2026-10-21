@@ -20,6 +20,30 @@ export const T5 = {
   none: 51727,
 } as const;
 
+/**
+ * The served run's own numbers, read from its record (decisions.md section 33: run 2 is served). Run 1's record equals
+ * {@link T5}, which the build still checks when run 1 is served.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function expectedOf(run: any): Record<keyof typeof T5, number> {
+  const a = run.counts.appraisal;
+  const p = run.counts.permits;
+  const r = run.roof_age;
+  return {
+    seed: a.seed,
+    properties: a.ready,
+    dead: a.dead,
+    publishedPermits: p.published,
+    parcelsWithPermits: p.parcels_with_permits,
+    capturedPermits: p.captured,
+    roofAgeEligible: r.eligible,
+    high: r.by_confidence.high,
+    medium: r.by_confidence.medium,
+    low: r.by_confidence.low,
+    none: a.ready - r.eligible,
+  };
+}
+
 export interface ReconcileReport {
   ok: boolean;
   textIndexRows: number;
@@ -41,6 +65,10 @@ export async function reconcile(
     checks.push({ name, expected, actual, ok: actual === expected });
   const n = (name: string, v: number) => (numbers[name] = v);
 
+  const expected = expectedOf(run);
+  if (run.run_id === '20261018T143520Z-t5-full')
+    for (const [key, value] of Object.entries(T5))
+      eq(`run 1 record ${key} = T5`, expected[key as keyof typeof T5], value);
   const counts = Object.fromEntries(
     (await db.rows<{ name: string; value: string }>('SELECT * FROM meta_counts')).map((r) => [
       r.name,
@@ -67,7 +95,7 @@ export async function reconcile(
     WHERE p.roof_year IS DISTINCT FROM r.roof_year OR p.roof_age_years IS DISTINCT FROM r.roof_age_years
       OR p.roof_age_basis IS DISTINCT FROM r.roof_age_basis OR p.roof_age_confidence IS DISTINCT FROM r.roof_age_confidence`);
   eq(
-    'roof age: parcels differing from the kit reference (reconcile-a1/roof-age.jsonl)',
+    'roof age: parcels differing from the kit reference (reconcile-a<n>/roof-age.jsonl)',
     refMismatch,
     0,
   );
@@ -108,22 +136,22 @@ export async function reconcile(
         );
       }
     }
-    // T5 totals
-    eq('seed rows (properties + dead)', counts.seed_rows, T5.seed);
-    eq('ready properties', counts.properties, T5.properties);
-    eq('dead accounts', counts.properties_dead, T5.dead);
-    eq('published permits', counts.permits_published, T5.publishedPermits);
-    eq('parcels with permits', counts.parcels_with_permits, T5.parcelsWithPermits);
-    eq('captured permits', counts.captured_permits, T5.capturedPermits);
-    eq('permits-internal rows = capture rows', ctx.permitsInternal.total, T5.capturedPermits);
-    eq('roof age on', counts.with_roof_age, T5.roofAgeEligible);
-    eq('roof age high', counts.roof_age_high, T5.high);
-    eq('roof age medium', counts.roof_age_medium, T5.medium);
-    eq('roof age low', counts.roof_age_low, T5.low);
-    eq('roof age none', counts.properties! - counts.with_roof_age!, T5.none);
+    // the served run's totals (its own record)
+    eq('seed rows (properties + dead)', counts.seed_rows, expected.seed);
+    eq('ready properties', counts.properties, expected.properties);
+    eq('dead accounts', counts.properties_dead, expected.dead);
+    eq('published permits', counts.permits_published, expected.publishedPermits);
+    eq('parcels with permits', counts.parcels_with_permits, expected.parcelsWithPermits);
+    eq('captured permits', counts.captured_permits, expected.capturedPermits);
+    eq('permits-internal rows = capture rows', ctx.permitsInternal.total, expected.capturedPermits);
+    eq('roof age on', counts.with_roof_age, expected.roofAgeEligible);
+    eq('roof age high', counts.roof_age_high, expected.high);
+    eq('roof age medium', counts.roof_age_medium, expected.medium);
+    eq('roof age low', counts.roof_age_low, expected.low);
+    eq('roof age none', counts.properties! - counts.with_roof_age!, expected.none);
     // and the run record itself still says the same
-    eq('run record roof_age.eligible', run.roof_age.eligible, T5.roofAgeEligible);
-    eq('run record published', run.counts.permits.published, T5.publishedPermits);
+    eq('run record roof_age.eligible', run.roof_age.eligible, expected.roofAgeEligible);
+    eq('run record published', run.counts.permits.published, expected.publishedPermits);
     eq(
       'run record permits out_of_county',
       run.unlinked_reasons.out_of_county,
