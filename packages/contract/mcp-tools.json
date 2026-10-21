@@ -122,6 +122,20 @@
           "type": "number",
           "exclusiveMinimum": 0
         },
+        "roof_work_class": {
+          "description": "Limit the roofing-permit signal to these roofing classes: roofing_permit_counts.open and .stalled, the open, long-open and stalled match reasons, the ordering and total. Omit for all four roofing classes. For replacements and repairs only: primary_roof_replacement,repair_or_coating. Comma-separated list on REST (roofing roof_work_class values); a JSON array in MCP.",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "primary_roof_replacement",
+              "primary_roof_new_construction",
+              "repair_or_coating",
+              "accessory_roof"
+            ]
+          }
+        },
         "owner_tenure_min": {
           "description": "Years since the deed date; narrows the match.",
           "type": "number",
@@ -1247,6 +1261,14 @@
             "status_group": {
               "$ref": "#/$defs/StatusGroup"
             },
+            "status_group_basis": {
+              "description": "status: status_group maps the printed status. completed_date: the printed status is open or stalled but the permit has a completed_date, so it is served as closed.",
+              "type": "string",
+              "enum": [
+                "status",
+                "completed_date"
+              ]
+            },
             "status_observed_at": {
               "type": "string"
             },
@@ -2001,6 +2023,14 @@
             "status_group": {
               "$ref": "#/$defs/StatusGroup"
             },
+            "status_group_basis": {
+              "description": "status: status_group maps the printed status. completed_date: the printed status is open or stalled but the permit has a completed_date, so it is served as closed.",
+              "type": "string",
+              "enum": [
+                "status",
+                "completed_date"
+              ]
+            },
             "status_observed_at": {
               "type": "string"
             },
@@ -2643,6 +2673,14 @@
             "status_group": {
               "$ref": "#/$defs/StatusGroup"
             },
+            "status_group_basis": {
+              "description": "status: status_group maps the printed status. completed_date: the printed status is open or stalled but the permit has a completed_date, so it is served as closed.",
+              "type": "string",
+              "enum": [
+                "status",
+                "completed_date"
+              ]
+            },
             "status_observed_at": {
               "type": "string"
             },
@@ -3064,6 +3102,14 @@
         },
         "status_group": {
           "$ref": "#/$defs/StatusGroup"
+        },
+        "status_group_basis": {
+          "description": "status: status_group maps the printed status. completed_date: the printed status is open or stalled but the permit has a completed_date, so it is served as closed.",
+          "type": "string",
+          "enum": [
+            "status",
+            "completed_date"
+          ]
         },
         "status_observed_at": {
           "type": "string"

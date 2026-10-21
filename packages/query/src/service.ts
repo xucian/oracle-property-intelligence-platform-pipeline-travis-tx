@@ -17,6 +17,7 @@ import type {
   searchPropertiesParams,
   textSearchParams,
 } from '@travis/contract';
+import { ROOFING_CLASSES } from '@travis/contract';
 import { badRequest, notFound } from './errors.js';
 import { TEXT_ALIASES, normalizeCenterName, normalizeMatcherName, normalizeText } from './text.js';
 
@@ -28,6 +29,36 @@ export type PermitSearchParams = ReturnType<typeof searchPermitsParams>['_output
 export type TextSearchParams = ReturnType<typeof textSearchParams>['_output'];
 export type BusinessSearchParams = ReturnType<typeof businessSearchParams>['_output'];
 export type LicenseSearchParams = ReturnType<typeof licenseSearchParams>['_output'];
+
+export { ROOFING_CLASSES };
+type RoofingClass = (typeof ROOFING_CLASSES)[number];
+/** The per-class roofing-permit signal columns of `properties` (schema.sql). */
+export const classSignalColumns = (c: RoofingClass) => ({
+  open: `roofing_open_count__${c}`,
+  stalled: `roofing_stalled_count__${c}`,
+  minOpenSince: `open_roofing_min_open_since__${c}`,
+  maxStalledDays: `stalled_roofing_max_duration_days__${c}`,
+});
+
+/** The property signal over some roofing classes (all four when none are given); least/greatest skip NULLs. */
+function signalExprs(classes: readonly RoofingClass[] | undefined) {
+  if (!classes)
+    return {
+      open: 'roofing_open_count',
+      stalled: 'roofing_stalled_count',
+      minOpenSince: 'open_roofing_min_open_since',
+      maxStalledDays: 'stalled_roofing_max_duration_days',
+    };
+  const cols = [...new Set(classes)].map(classSignalColumns);
+  const join = (k: keyof (typeof cols)[number], f: string) =>
+    cols.length === 1 ? cols[0]![k] : `${f}(${cols.map((c) => c[k]).join(', ')})`;
+  return {
+    open: `(${cols.map((c) => c.open).join(' + ')})`,
+    stalled: `(${cols.map((c) => c.stalled).join(' + ')})`,
+    minOpenSince: join('minOpenSince', 'least'),
+    maxStalledDays: join('maxStalledDays', 'greatest'),
+  };
+}
 
 /**
  * Serving mode (decisions.md section 30): `dbPath` is the small serving file (the small tables, permit_text and its
@@ -108,6 +139,9 @@ const DATASET_URL = 'https://data.austintexas.gov/resource/3syk-w9eu';
 const lit = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const jparse = (s: unknown): any => (typeof s === 'string' ? JSON.parse(s) : s);
+/** A printed phone with fewer than 10 digits (an area code alone, say) is no phone. */
+const phone = (s: unknown): string | null =>
+  typeof s === 'string' && s.replace(/\D/g, '').length >= 10 ? s : null;
 
 function httpRequest(s: unknown): {
   method: string;
@@ -630,9 +664,8 @@ export class Queries {
     const conds: string[] = [];
     if (center)
       conds.push('lat IS NOT NULL', bbox(center.lat, center.lon, p.radius_miles, 'lat', 'lon'));
-    const permitClause = p.open_permits
-      ? '(roofing_open_count > 0 OR roofing_stalled_count > 0)'
-      : null;
+    const sig = signalExprs(p.roof_work_class);
+    const permitClause = p.open_permits ? `(${sig.open} > 0 OR ${sig.stalled} > 0)` : null;
     const ageClause = p.roof_age_min > 0 ? `roof_age_years > ${p.roof_age_min}` : null;
     const match = [ageClause, permitClause].filter(Boolean);
     if (match.length) conds.push(`(${match.join(' OR ')})`);
@@ -649,7 +682,12 @@ export class Queries {
         `owner_out_of_area IS NOT DISTINCT FROM ${p.out_of_area_owner ? 'TRUE' : 'FALSE'} AND owner_out_of_area IS NOT NULL`,
       );
     const where = conds.join(' AND ') || 'TRUE';
-    const base = `(SELECT ${this.propCols(asOf)}, ${dist} AS distance_miles FROM properties p WHERE ${where.replace(/\b(lat|lon)\b/g, 'p.$1')})`;
+    const inner = `(SELECT ${this.propCols(asOf)}, ${dist} AS distance_miles FROM properties p WHERE ${where.replace(/\b(lat|lon)\b/g, 'p.$1')})`;
+    // with roof_work_class the four signal columns are the requested classes' combination, everywhere below
+    const base = p.roof_work_class
+      ? `(SELECT * REPLACE (${sig.open} AS roofing_open_count, ${sig.stalled} AS roofing_stalled_count,
+          ${sig.minOpenSince} AS open_roofing_min_open_since, ${sig.maxStalledDays} AS stalled_roofing_max_duration_days) FROM ${inner})`
+      : inner;
     const within = center ? `WHERE distance_miles <= ${p.radius_miles}` : '';
     const total = await this.scalar(`SELECT count(*) FROM ${base} ${within}`);
     const longDays = p.long_open_years * 365;
@@ -778,6 +816,7 @@ export class Queries {
         is_reroof: r.is_reroof,
         status: r.status ?? '',
         status_group: r.status_group,
+        status_group_basis: r.status_group_basis,
         status_observed_at: r.status_observed_at,
         status_source: r.status_source,
         applied_date: r.applied_date ?? null,
@@ -802,7 +841,7 @@ export class Queries {
                 printed_name: r.contractor_full_name ?? '',
                 company_name: r.contractor_company_name ?? null,
                 trade: r.contractor_trade ?? null,
-                phone: r.contractor_phone ?? null,
+                phone: phone(r.contractor_phone),
               },
         bbb,
         lat: r.lat ?? null,
@@ -1004,7 +1043,7 @@ export class Queries {
       company_name: c.company_name ?? null,
       printed_names: c.printed_names ?? [],
       trade: c.trade ?? null,
-      phone: c.phone ?? null,
+      phone: phone(c.phone),
       address: c.address ?? null,
       permit_count: c.permit_count,
       open_permit_count: c.open_permit_count,

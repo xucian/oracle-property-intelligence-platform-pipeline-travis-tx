@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MatchReason, RoofWorkClass, StatusGroup, def, obj } from './shared.js';
+import { MatchReason, ROOFING_CLASSES, RoofWorkClass, StatusGroup, def, obj } from './shared.js';
 
 /**
  * Query/path/tool parameters. One natural-typed schema per operation: lists are arrays, booleans
@@ -93,6 +93,14 @@ export function searchPropertiesParams(mode: Mode) {
       .positive()
       .default(5)
       .describe('Long-open threshold in years (open_duration_days >= long_open_years x 365).'),
+    roof_work_class: z
+      .array(z.enum(ROOFING_CLASSES))
+      .min(1)
+      .optional()
+      .describe(
+        'Limit the roofing-permit signal to these roofing classes: roofing_permit_counts.open and .stalled, the open, long-open and stalled match reasons, the ordering and total. Omit for all four roofing classes. For replacements and repairs only: primary_roof_replacement,repair_or_coating.' +
+          csv('roofing roof_work_class values'),
+      ),
     owner_tenure_min: z
       .number()
       .min(0)

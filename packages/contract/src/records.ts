@@ -150,6 +150,12 @@ export const PermitSummary = def(
     is_reroof: z.boolean(),
     status: z.string(),
     status_group: StatusGroup,
+    status_group_basis: z
+      .enum(['status', 'completed_date'])
+      .optional()
+      .describe(
+        'status: status_group maps the printed status. completed_date: the printed status is open or stalled but the permit has a completed_date, so it is served as closed.',
+      ),
     status_observed_at: z.string(),
     status_source: StatusSource,
     applied_date: nstr,

@@ -21,7 +21,6 @@
           "kind": "property",
           "tool": "search_properties",
           "values": [
-            "253108",
             "221167",
             "196735",
             "346131",
@@ -40,7 +39,8 @@
             "135841",
             "196998",
             "236323",
-            "194947"
+            "194947",
+            "504107"
           ],
           "total": 3813,
           "computed_by": "query layer"
@@ -48,6 +48,6 @@
       }
     }
   ],
-  "computed_on": "deploy 8191073a04a47541",
+  "computed_on": "deploy 0b604818b489aff5",
   "built_at": "2026-10-21"
 }

@@ -193,6 +193,23 @@ CREATE TABLE properties (
   roofing_needs_review_count INTEGER NOT NULL DEFAULT 0,
   open_roofing_min_open_since DATE,                    -- earliest open_since among open roofing permits; open duration = as_of - this
   stalled_roofing_max_duration_days INTEGER,           -- max stalled duration (expires_date|statusdate - open_since) among stalled roofing permits
+  -- the same four signals per roofing class (search_properties roof_work_class combines the requested classes)
+  roofing_open_count__primary_roof_replacement      INTEGER NOT NULL DEFAULT 0,
+  roofing_stalled_count__primary_roof_replacement   INTEGER NOT NULL DEFAULT 0,
+  open_roofing_min_open_since__primary_roof_replacement DATE,
+  stalled_roofing_max_duration_days__primary_roof_replacement INTEGER,
+  roofing_open_count__primary_roof_new_construction      INTEGER NOT NULL DEFAULT 0,
+  roofing_stalled_count__primary_roof_new_construction   INTEGER NOT NULL DEFAULT 0,
+  open_roofing_min_open_since__primary_roof_new_construction DATE,
+  stalled_roofing_max_duration_days__primary_roof_new_construction INTEGER,
+  roofing_open_count__repair_or_coating      INTEGER NOT NULL DEFAULT 0,
+  roofing_stalled_count__repair_or_coating   INTEGER NOT NULL DEFAULT 0,
+  open_roofing_min_open_since__repair_or_coating DATE,
+  stalled_roofing_max_duration_days__repair_or_coating INTEGER,
+  roofing_open_count__accessory_roof      INTEGER NOT NULL DEFAULT 0,
+  roofing_stalled_count__accessory_roof   INTEGER NOT NULL DEFAULT 0,
+  open_roofing_min_open_since__accessory_roof DATE,
+  stalled_roofing_max_duration_days__accessory_roof INTEGER,
   permit_count       INTEGER NOT NULL DEFAULT 0,       -- all served permits of the property
   has_bbb_contractor BOOLEAN NOT NULL DEFAULT FALSE,
   -- owner (public roll fields); NULL when owner_confidential
@@ -311,6 +328,8 @@ CREATE TABLE permits (
   is_roofing         BOOLEAN NOT NULL,
   is_reroof          BOOLEAN NOT NULL,
   status_group       VARCHAR NOT NULL CHECK (status_group IN ('open','stalled','closed','needs_review')),
+  status_group_basis VARCHAR NOT NULL CHECK (status_group_basis IN ('status','completed_date')), -- completed_date: profile said open/stalled, a completed_date closes it
+  status_group_profile VARCHAR NOT NULL CHECK (status_group_profile IN ('open','stalled','closed','needs_review')), -- the profile's mapping of the printed status
   lifecycle_status   VARCHAR NOT NULL,                 -- estimator mapping: completed | other | ...
   -- open/stalled durations: static parts (query-time parts in SCHEMA.md)
   open_since         DATE,                             -- issued_date, else applied_date

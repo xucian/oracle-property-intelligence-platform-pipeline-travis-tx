@@ -317,7 +317,7 @@ export class App {
         405,
         'method_not_allowed',
         req.requestId,
-        'POST only; this server issues no sessions and no SSE stream',
+        'MCP endpoint: send JSON-RPC requests with POST. A GET answers 405 because this server opens no SSE stream, as the MCP spec requires.',
         { allow: 'POST' },
       );
     const version = req.headers['mcp-protocol-version'];

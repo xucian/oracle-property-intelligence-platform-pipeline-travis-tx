@@ -16,8 +16,8 @@
           {
             "name": "search_permits",
             "args": {
-              "lat": 30.207183850747548,
-              "lon": -97.79934458869465,
+              "lat": 30.207183850747537,
+              "lon": -97.79934458869468,
               "radius_miles": 3,
               "status_group": ["stalled"],
               "min_open_years": {
@@ -57,6 +57,6 @@
       }
     }
   ],
-  "computed_on": "deploy 8191073a04a47541",
+  "computed_on": "deploy 0b604818b489aff5",
   "built_at": "2026-10-21"
 }

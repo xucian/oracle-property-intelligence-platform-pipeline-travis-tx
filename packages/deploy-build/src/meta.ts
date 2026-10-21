@@ -56,11 +56,7 @@ export async function loadMeta(
     hex: string;
   }[] = [];
   for (const f of readdirSync(runsDir).sort()) {
-    if (
-      !f.endsWith('.json') ||
-      f.endsWith('.publication.json') ||
-      f.includes('.gateway-checks')
-    )
+    if (!f.endsWith('.json') || f.endsWith('.publication.json') || f.includes('.gateway-checks'))
       continue;
     const text = readFileSync(path.join(runsDir, f), 'utf8');
     const rec = JSON.parse(text);
@@ -82,7 +78,10 @@ export async function loadMeta(
       record_json:
         rec.groups && Object.keys(rec.groups).length > 0
           ? text
-          : JSON.stringify({ ...rec, groups: groupsOfManifest(JSON.parse(bytes.toString('utf8'))) }),
+          : JSON.stringify({
+              ...rec,
+              groups: groupsOfManifest(JSON.parse(bytes.toString('utf8'))),
+            }),
     });
     manifestRows.push({
       run_id: rec.run_id,
@@ -184,6 +183,8 @@ export async function loadMeta(
       const cnt = (sql: string) => db2.scalar(sql);
       const set = new Map<string, number>();
       const inCounty = `unlinked_reason IS DISTINCT FROM 'out_of_county'`;
+      // a completed_date closes an open or stalled permit, as in build.ts
+      const notCompleted = `completed_date_evidence IS DISTINCT FROM 'confirmed_present'`;
       set.set('properties', await cnt('SELECT count(*) FROM properties'));
       set.set(
         'with_coordinates',
@@ -213,13 +214,13 @@ export async function loadMeta(
       set.set(
         'open_roofing_permits',
         await cnt(
-          `SELECT count(*) FROM permits_internal WHERE ${inCounty} AND is_roofing AND status_group = 'open'`,
+          `SELECT count(*) FROM permits_internal WHERE ${inCounty} AND is_roofing AND status_group = 'open' AND ${notCompleted}`,
         ),
       );
       set.set(
         'stalled_roofing_permits',
         await cnt(
-          `SELECT count(*) FROM permits_internal WHERE ${inCounty} AND is_roofing AND status_group = 'stalled'`,
+          `SELECT count(*) FROM permits_internal WHERE ${inCounty} AND is_roofing AND status_group = 'stalled' AND ${notCompleted}`,
         ),
       );
       set.set(
@@ -334,6 +335,33 @@ export async function loadMeta(
         incomplete_reason: 'needs_review_values',
         detail: `values outside the permit profile's mapping are needs_review and excluded from the open, stalled and closed counts and from the open-permit signal: ${unmText}`,
         evidence: 'unmapped_values',
+        records_request: null,
+      });
+      const completedOpen = await db2.rows<{ n: string; roofing: string }>(
+        `SELECT count(*) n, count(*) FILTER (is_roofing) roofing FROM permits_internal
+         WHERE ${inCounty} AND status_group IN ('open', 'stalled') AND NOT ${notCompleted}`,
+      );
+      lims.push({
+        seq: ++seq,
+        scope: 'deploy',
+        source: 'austin-issued-construction-permits/3syk-w9eu',
+        availability: 'supported_partial',
+        source_access_status: 'available',
+        incomplete_reason: 'completed_date_closes_status',
+        detail: `${Number(completedOpen[0]!.n).toLocaleString('en-US')} permits (${Number(completedOpen[0]!.roofing).toLocaleString('en-US')} roofing) print an open or stalled status but have a completed date: they are served as closed (status_group_basis completed_date), with the printed status kept in status, and are left out of the open and stalled counts and the long-open signal`,
+        evidence: 'docs/decisions.md section 36',
+        records_request: null,
+      });
+      lims.push({
+        seq: ++seq,
+        scope: 'deploy',
+        source: 'tcad-2026-certified-appraisal-export',
+        availability: 'supported_partial',
+        source_access_status: 'available',
+        incomplete_reason: 'later_supplement_not_loaded',
+        detail:
+          "owner, deed and value fields are from TCAD's 2026 certified roll (supplement 0, 2026-07-18); TCAD's supplemental roll export 335 of 2026-10-08 uses a different file layout and is not loaded: run 2 refreshed the permits only",
+        evidence: 'docs/decisions.md sections 33 and 36',
         records_request: null,
       });
       lims.push({

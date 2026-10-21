@@ -9,7 +9,8 @@ import { type Kit } from './kit.js';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** The served run's as-of date (its record's `roof_age.as_of_date`): permit durations and roof ages are as of it. */
-export const ROOF_AGE_AS_OF: string = JSON.parse(readFileSync(RUN_RECORD_PATH, 'utf8')).roof_age.as_of_date;
+export const ROOF_AGE_AS_OF: string = JSON.parse(readFileSync(RUN_RECORD_PATH, 'utf8')).roof_age
+  .as_of_date;
 
 /** NDJSON writer with backpressure. */
 export class NdjsonWriter {

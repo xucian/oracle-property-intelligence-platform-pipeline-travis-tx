@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { ROOFING_CLASSES, classSignalColumns } from '@travis/query';
 import type { BuildOptions } from './build.js';
 import type { Db } from './db.js';
 import { MANIFEST_PATH, RUN_RECORD_PATH } from './env.js';
@@ -108,10 +109,29 @@ export async function reconcile(
   // the profile's classification vs the kit's permits-internal.jsonl, permit by permit
   const clsMismatch =
     await db.scalar(`SELECT count(*) FROM permits p JOIN permits_internal i ON i.permit_number = p.permit_id
-    WHERE p.status_group <> i.status_group OR p.roof_work_class <> i.roof_work_class OR p.is_roofing <> i.is_roofing
+    WHERE p.status_group_profile <> i.status_group OR p.roof_work_class <> i.roof_work_class OR p.is_roofing <> i.is_roofing
       OR p.is_reroof <> i.is_reroof OR p.lifecycle_status <> i.lifecycle_status OR p.completed_date_evidence <> i.completed_date_evidence
       OR p.property_id <> i.property_id`);
   eq('permit classification: permits differing from permits-internal.jsonl', clsMismatch, 0);
+  n(
+    'permits_closed_by_completed_date',
+    await db.scalar(`SELECT count(*) FROM permits WHERE status_group_basis = 'completed_date'`),
+  );
+  eq(
+    'served open or stalled permits with a completed_date',
+    await db.scalar(
+      `SELECT count(*) FROM permits WHERE status_group IN ('open', 'stalled') AND completed_date IS NOT NULL`,
+    ),
+    0,
+  );
+  const sum = (k: 'open' | 'stalled') =>
+    ROOFING_CLASSES.map((c) => classSignalColumns(c)[k]).join(' + ');
+  eq(
+    'properties whose per-class open and stalled counts do not add up',
+    await db.scalar(`SELECT count(*) FROM properties
+      WHERE ${sum('open')} <> roofing_open_count OR ${sum('stalled')} <> roofing_stalled_count`),
+    0,
+  );
   eq(
     'every published permit is in permits-internal',
     await db.scalar(
@@ -165,7 +185,7 @@ export async function reconcile(
     // roofing counts: the profile's recount of the published permits vs the run record's linked-roofing numbers
     const g = run.counts.permits.roofing.by_status_group_linked as Record<string, number>;
     const linkedRoofing = await db.rows<{ status_group: string; n: string }>(
-      `SELECT status_group, count(*) n FROM permits WHERE is_roofing GROUP BY 1`,
+      `SELECT status_group_profile AS status_group, count(*) n FROM permits WHERE is_roofing GROUP BY 1`,
     );
     for (const r of linkedRoofing) {
       const want = g[r.status_group] ?? 0;

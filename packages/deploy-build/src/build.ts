@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { readPostLoadSql, readSchemaSql } from '@travis/query';
+import { ROOFING_CLASSES, classSignalColumns, readPostLoadSql, readSchemaSql } from '@travis/query';
 import { Db, q, qlist } from './db.js';
 import { KIT_DATA, RUN_ID } from './env.js';
 import { loadKit, type Kit } from './kit.js';
@@ -143,6 +143,11 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
     contractor_zip:'VARCHAR', contractor_attribution_key:'VARCHAR', roof_work_class:'VARCHAR', work_classifier_version:'VARCHAR',
     is_roofing:'BOOLEAN', is_reroof:'BOOLEAN', status_group:'VARCHAR', lifecycle_status:'VARCHAR', status_observed_at:'VARCHAR',
     capture_file:'VARCHAR', capture_row_index:'BIGINT', capture_row_sha256:'VARCHAR', capture_receipt_sha256:'VARCHAR'})`);
+  // A completed_date closes a permit whose printed status still maps to open or stalled (decisions.md section 36); the
+  // profile's own mapping stays in status_group_profile, which the reconciliation compares with the kit's.
+  await db.run(`ALTER TABLE permit_stage ADD COLUMN status_group_profile VARCHAR`);
+  await db.run(`UPDATE permit_stage SET status_group_profile = status_group,
+    status_group = CASE WHEN status_group IN ('open', 'stalled') AND completed_date IS NOT NULL THEN 'closed' ELSE status_group END`);
   lap('stage-load', t);
 
   // ---- permits (without radius basis), then properties, then the radius basis ------------------------------------------
@@ -162,7 +167,8 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
       s.issued_date, s.expires_date, s.completed_date, s.completed_date_raw, s.completed_date_evidence, s.lat, s.lon,
       s.contractor_trade, s.contractor_company_name, s.contractor_full_name, s.contractor_phone, s.contractor_address1,
       s.contractor_address2, s.contractor_city, s.contractor_zip, s.contractor_attribution_key, s.roof_work_class,
-      s.work_classifier_version, s.is_roofing, s.is_reroof, s.status_group, s.lifecycle_status,
+      s.work_classifier_version, s.is_roofing, s.is_reroof, s.status_group, s.status_group_profile,
+      CASE WHEN s.status_group <> s.status_group_profile THEN 'completed_date' ELSE 'status' END AS status_group_basis, s.lifecycle_status,
       coalesce(s.issued_date, s.applied_date) AS open_since,
       CASE WHEN s.issued_date IS NOT NULL THEN 'issued_date' WHEN s.applied_date IS NOT NULL THEN 'applied_date' END AS open_since_basis,
       CASE WHEN s.status_group = 'stalled' AND coalesce(s.issued_date, s.applied_date) IS NOT NULL THEN
@@ -206,7 +212,14 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
       count(*) FILTER (is_roofing AND status_group = 'closed')::INTEGER AS roofing_closed_count,
       count(*) FILTER (roof_work_class = 'needs_review' OR (is_roofing AND status_group = 'needs_review'))::INTEGER AS roofing_needs_review_count,
       min(open_since) FILTER (is_roofing AND status_group = 'open') AS open_roofing_min_open_since,
-      max(static_duration_days) FILTER (is_roofing AND status_group = 'stalled')::INTEGER AS stalled_roofing_max_duration_days
+      max(static_duration_days) FILTER (is_roofing AND status_group = 'stalled')::INTEGER AS stalled_roofing_max_duration_days,
+      ${ROOFING_CLASSES.map((c) => {
+        const k = classSignalColumns(c);
+        return `count(*) FILTER (roof_work_class = '${c}' AND status_group = 'open')::INTEGER AS ${k.open},
+      count(*) FILTER (roof_work_class = '${c}' AND status_group = 'stalled')::INTEGER AS ${k.stalled},
+      min(open_since) FILTER (roof_work_class = '${c}' AND status_group = 'open') AS ${k.minOpenSince},
+      max(static_duration_days) FILTER (roof_work_class = '${c}' AND status_group = 'stalled')::INTEGER AS ${k.maxStalledDays}`;
+      }).join(',\n      ')}
     FROM permits_joined GROUP BY property_id`);
   await db.run(`CREATE TEMP TABLE last_roofing AS
     SELECT property_id, permit_id, open_since, status_group, roof_work_class FROM (
@@ -242,6 +255,10 @@ export async function buildDatabase(o: BuildOptions): Promise<BuildReport> {
       coalesce(pa.roofing_open_count, 0) AS roofing_open_count, coalesce(pa.roofing_stalled_count, 0) AS roofing_stalled_count,
       coalesce(pa.roofing_closed_count, 0) AS roofing_closed_count, coalesce(pa.roofing_needs_review_count, 0) AS roofing_needs_review_count,
       pa.open_roofing_min_open_since, pa.stalled_roofing_max_duration_days, coalesce(pa.permit_count, 0) AS permit_count,
+      ${ROOFING_CLASSES.map((c) => {
+        const k = classSignalColumns(c);
+        return `coalesce(pa.${k.open}, 0) AS ${k.open}, coalesce(pa.${k.stalled}, 0) AS ${k.stalled}, pa.${k.minOpenSince}, pa.${k.maxStalledDays}`;
+      }).join(',\n      ')},
       FALSE AS has_bbb_contractor,
       s.owner_confidential,
       CASE WHEN NOT s.owner_confidential THEN s.owner_name END AS owner_name,

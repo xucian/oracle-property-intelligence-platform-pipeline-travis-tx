@@ -164,6 +164,6 @@ export async function buildFixture(o: {
   renameSync(tmp, o.outFile);
   rmSync(`${tmp}.wal`, { force: true });
   const bytes = statSync(o.outFile).size;
-  if (bytes > 15_000_000) throw new Error(`fixture is ${bytes} bytes; the limit is about 15 MB`);
+  if (bytes > 18_000_000) throw new Error(`fixture is ${bytes} bytes; the limit is about 18 MB`);
   return { bytes, counts };
 }

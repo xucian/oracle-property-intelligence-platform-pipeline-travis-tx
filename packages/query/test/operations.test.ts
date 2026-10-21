@@ -14,6 +14,7 @@ import {
   RunsResponse,
   SearchCentersResponse,
   businessSearchParams,
+  coerceQuery,
   licenseSearchParams,
   searchPermitsParams,
   searchPropertiesParams,
@@ -51,7 +52,11 @@ describe.skipIf(!fixtureExists())('operations on the fixture database', () => {
 
   it('runs: the real run records, mapped onto the contract shape, validate', async () => {
     const r = expectValid(RunsResponse, await q.listRuns(), 'runs');
-    expect(r.items.map((x) => x.run_id)).toEqual(['20261018T143520Z-t5-full', '20261017T072132Z']);
+    expect(r.items.map((x) => x.run_id)).toEqual([
+      '20261020T200236Z-t5-full',
+      '20261018T143520Z-t5-full',
+      '20261017T072132Z',
+    ]);
     const full = r.items[0]!;
     expect(Object.keys(full.groups).length).toBe(177);
     expect(full.manifest_cid).toMatch(/^bafy/);
@@ -181,7 +186,7 @@ describe.skipIf(!fixtureExists())('operations on the fixture database', () => {
     expect(d.permits.length).toBeGreaterThan(0);
     expect(d.permits_total).toBeGreaterThanOrEqual(d.permits.length);
     expect(d.unpublished_source?.evidence_state).toBe('confirmed_present');
-    expect(d.source.run_id).toBe('20261018T143520Z-t5-full');
+    expect(d.source.run_id).toBe('20261020T200236Z-t5-full');
     const g = expectValid(PropertyDetail, await q.getProperty({ geo_id: s.geoId }), 'by geo id');
     expect(g.property_id).toBe(s.propertyId);
     const short = await q.getProperty({ property_id: s.openPropertyId }, 2);
@@ -255,6 +260,92 @@ describe.skipIf(!fixtureExists())('operations on the fixture database', () => {
       'needs review',
     );
     expect(nr.items.every((p) => p.status_group === 'needs_review')).toBe(true);
+  });
+
+  it('a completed_date closes a permit whose printed status maps to open or stalled', async () => {
+    const rows = async (sql: string) =>
+      (await q.conn.runAndReadAll(sql)).getRowObjectsJson() as Record<string, string>[];
+    expect(
+      await rows(
+        `SELECT permit_id FROM permits WHERE status_group IN ('open', 'stalled') AND completed_date IS NOT NULL`,
+      ),
+    ).toEqual([]);
+    const [closed] = await rows(
+      `SELECT permit_id FROM permits WHERE status_group_basis = 'completed_date' ORDER BY permit_id LIMIT 1`,
+    );
+    expect(closed).toBeDefined();
+    const p = expectValid(
+      PermitDetail,
+      await q.getPermit(String(closed!.permit_id)),
+      'closed permit',
+    );
+    expect(p).toMatchObject({ status_group: 'closed', status_group_basis: 'completed_date' });
+    expect(p.completed_date).not.toBeNull();
+    expect(p.open_duration_days).toBeNull();
+    const long = await q.searchPermits(
+      searchPermitsParams('rest').parse({ min_open_years: 5, radius_miles: 25, limit: 500 }),
+    );
+    expect(long.items.length).toBeGreaterThan(0);
+    expect(long.items.filter((x) => x.completed_date !== null)).toEqual([]);
+  });
+
+  it('property search roof_work_class limits the permit signal to those classes', async () => {
+    const classes = ['primary_roof_replacement', 'repair_or_coating'];
+    const all = await q.searchProperties(sp({ roof_age_min: 0, open_permits: true, limit: 500 }));
+    const some = expectValid(
+      PropertySearchResponse,
+      await q.searchProperties(
+        searchPropertiesParams('rest').parse(
+          coerceQuery(searchPropertiesParams('rest'), {
+            lat: String(s.center.lat),
+            lon: String(s.center.lon),
+            radius_miles: '8',
+            roof_age_min: '0',
+            roof_work_class: classes.join(','),
+            limit: '500',
+          }),
+        ),
+      ),
+      'replacement and repair',
+    );
+    expect(some.items.length).toBeGreaterThan(0);
+    expect(some.total).toBeLessThan(all.total);
+    for (const row of some.items) {
+      const d = await q.getProperty({ property_id: row.property_id });
+      const signal = d.permits.filter(
+        (p) => classes.includes(p.roof_work_class) && ['open', 'stalled'].includes(p.status_group),
+      );
+      expect(signal.length, row.property_id).toBeGreaterThan(0);
+      expect(row.roofing_permit_counts.open, row.property_id).toBe(
+        signal.filter((p) => p.status_group === 'open').length,
+      );
+      if (row.match_reasons?.includes('long_open_roofing_permit'))
+        expect(
+          signal.some((p) => p.completed_date === null && (p.open_duration_days ?? 0) >= 5 * 365),
+          row.property_id,
+        ).toBe(true);
+    }
+    expect(
+      searchPropertiesParams('rest').safeParse({ open_permits: true, roof_work_class: ['other'] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('a contractor phone with fewer than 10 digits is null', async () => {
+    const one = async (cond: string) =>
+      (
+        (
+          await q.conn.runAndReadAll(
+            `SELECT permit_id FROM permits WHERE contractor_attribution_key IS NOT NULL AND contractor_phone IS NOT NULL
+             AND length(regexp_replace(contractor_phone, '[^0-9]', '', 'g')) ${cond} ORDER BY permit_id LIMIT 1`,
+          )
+        ).getRowObjectsJson() as { permit_id: string }[]
+      )[0];
+    const short = await one('< 10');
+    expect(short).toBeDefined();
+    expect((await q.getPermit(short!.permit_id)).contractor?.phone).toBeNull();
+    const full = await one('>= 10');
+    expect((await q.getPermit(full!.permit_id)).contractor?.phone).toMatch(/\d/);
   });
 
   it('permit text search: aliases, stemming, match mode, snippets and scores', async () => {
@@ -427,6 +518,6 @@ describe.skipIf(!fixtureExists())('operations on the fixture database', () => {
   it('run summary carries meta and runs', async () => {
     const r = await q.getRunSummary();
     expect(r.meta.deploy.deploy_id).toBe(q.deployId);
-    expect(r.runs.length).toBe(2);
+    expect(r.runs.length).toBe(3);
   });
 });
