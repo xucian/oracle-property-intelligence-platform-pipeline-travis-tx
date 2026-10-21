@@ -2266,6 +2266,9 @@ Before submission the operator ruled that the search API needs a daily stop, not
 - **Behaviour.** While the flag is `true`, every REST and MCP request answers `503 {error: "api_unavailable", reason:
   "budget_exhausted", detail, request_id}` before the query layer is touched; the flag is read with the same 30 s cache
   and a 1.5 s bound, and at init. Warm-ups are not blocked. Reserved concurrency zero is still not used (section 21).
+- **Drilled live on 2026-10-21** by the operator: with the flag set `true`, `/v1/meta` answered `503 budget_exhausted`
+  on the first request (07:28:51Z); after it was set back to `false`, it answered 200 again at 07:29:27Z, inside the
+  30 s cache plus a warm container's lag.
 - **Cost of the worst day** falls to about $5: the requests before the alarm trips, then about 1.7 million fast 503s,
   mostly API Gateway's $1 per million.
 
