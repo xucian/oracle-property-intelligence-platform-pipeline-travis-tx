@@ -2351,3 +2351,25 @@ data and property search. Its session asked for R1–R5 (R1–R4 deployed by 19:
   from a fork and the upstream runs no workflow for it, so `pr.yml` also runs on pushes to the fork's `assignment`
   branch; green on `91eeb01` ([run 39598326275](https://github.com/xucian/oracle-property-intelligence-platform-pipeline-travis-tx/actions/runs/39598326275)).
   Prettier: three files from `b5770c4` reformatted (whitespace only; one is a saved golden result).
+
+## 37. 2026-10-21: R5's decline corrected, after the arceus and alakazam reviews
+
+Section 36 declined R5 partly on a wrong number and before any review. "About 2 million permit descriptions take hours"
+counted every permit: the text-indexed permits print 265,678 distinct descriptions, about 47 minutes at Titan V2's 6,000
+requests a minute. Both reviews were then run, read-only:
+
+- **arceus** routed it to alakazam (`build-rag-systems` is authoritative, and it requires OpenSearch for production
+  vector or hybrid retrieval) and recommended skipping it today: retrieval over the records with SQL filters and BM25,
+  with cited answers, already counts as RAG under that skill.
+- **alakazam** ([review](reviews/2026-10-21-alakazam-r5-hybrid-review.md)): no-go for 20:30. A careful build is about
+  6.5 h against 4.8 h left, and it would put a contract, IAM and image change on the live API under review. Its corrected
+  design (vectors in their own image file, ranking per distinct description, a calibrated cosine floor, the agent kept
+  lexical, a 20-query labelled evaluation) can ship in a later deploy; no OpenSearch is acceptable to it as a recorded
+  deviation under the conditions in the review.
+- **R5 stays declined, for those reasons.** Section 20's "embeddings go to OpenSearch" stands until a dated ruling adopts
+  alakazam's conditions.
+- **The embeddings made while this was weighed** (Titan V2, 256 dimensions, normalized, int8, keyed by
+  `md5(lower(trim(description)))` over all 265,678 distinct descriptions of the served run, about $0.10;
+  `apps/api/scripts/embed-descriptions.ts`) stay in `data/deploy/embeddings`, not served and not published, for that
+  later deploy. They are a deploy-time index of the served run, like the BM25 index, not a published artifact: runs 1
+  and 2 keep their CIDs, and a later run embeds only the descriptions not already cached.
